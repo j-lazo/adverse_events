@@ -146,6 +146,7 @@ def decode_image(file_name):
 
     return image
 
+
 def format_frames(frame, output_size):
     """
       Pad and resize an image from a video.
@@ -245,6 +246,7 @@ class FrameGenerator:
             list_of_no_events.append([self.dictionary_labels[x]['Path_img'] for x in temp_list])
             list_of_no_labels.append([self.dictionary_labels[x]['Overall'] for x in temp_list])
 
+        len_subLists = [len(x) for x in list_of_no_labels]
         list_of_no_labels = [x[0] for x in list_of_no_labels]
 
         # list_path_of_no_events = [self.dictionary_labels[x]['Path_img'] for x in temp_list]
@@ -252,7 +254,8 @@ class FrameGenerator:
 
         list_all_events += list_of_no_events
         list_all_labels += list_of_no_labels
-        list_all_labels = tf.data.Dataset.from_tensor_slices(list_all_labels)
+        print(len(list_all_labels), len(list_all_events))
+        #list_all_labels = tf.data.Dataset.from_tensor_slices(list_all_labels)
         self.pairs = list(zip(list_all_events, list_all_labels))
 
     def __call__(self):
@@ -262,7 +265,6 @@ class FrameGenerator:
         for paths, labels in self.pairs:
             image_batch = load_image_batch(paths, self.output_size)
             yield image_batch, labels
-
 
 def make_tf_image_dataset(dictionary_labels, labels_list, batch_size=2, training_mode=False,
                     num_repeat=None, custom_training=False, ignore_labels=False):
@@ -299,8 +301,6 @@ def make_tf_image_dataset(dictionary_labels, labels_list, batch_size=2, training
             #image = rotate_img(image)
 
         return image
-
-
 
     def configure_for_performance(dataset):
       dataset = dataset.shuffle(buffer_size=1000)
