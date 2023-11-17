@@ -246,7 +246,6 @@ class FrameGenerator:
             list_of_no_events.append([self.dictionary_labels[x]['Path_img'] for x in temp_list])
             list_of_no_labels.append([self.dictionary_labels[x]['Overall'] for x in temp_list])
 
-        len_subLists = [len(x) for x in list_of_no_labels]
         list_of_no_labels = [x[0] for x in list_of_no_labels]
 
         # list_path_of_no_events = [self.dictionary_labels[x]['Path_img'] for x in temp_list]
@@ -254,7 +253,6 @@ class FrameGenerator:
 
         list_all_events += list_of_no_events
         list_all_labels += list_of_no_labels
-        print(len(list_all_labels), len(list_all_events))
         #list_all_labels = tf.data.Dataset.from_tensor_slices(list_all_labels)
         self.pairs = list(zip(list_all_events, list_all_labels))
 
