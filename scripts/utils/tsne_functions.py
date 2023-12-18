@@ -1,16 +1,29 @@
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+
+
+# scale and move the coordinates so they fit [0; 1] range
+def scale_to_01_range(x):
+    # compute the distribution range
+    value_range = (np.max(x) - np.min(x))
+
+    # move the distribution so that it starts from zero
+    # by extracting the minimal value from all its values
+    starts_from_zero = x - np.min(x)
+
+    # make the distribution fit [0; 1] by dividing by its range
+    return starts_from_zero / value_range
 
 def visualize_tsne(tsne, labels, plot_size=1000, max_image_size=100):
     # extract x and y coordinates representing the positions of the images on T-SNE plot
     tx = tsne[:, 0]
     ty = tsne[:, 1]
-    print('tx vis', tx)
-    print('ty vis', tx)
+
     # scale and move the coordinates so they fit [0; 1] range
-    #tx = scale_to_01_range(tx)
-    #ty = scale_to_01_range(ty)
+    tx = scale_to_01_range(tx)
+    ty = scale_to_01_range(ty)
 
     # visualize the plot: samples as colored points
     visualize_tsne_points(tx, ty, labels)
@@ -20,7 +33,7 @@ colors_per_class = {
     '1': [0, 0, 255]}
 
 
-def visualize_tsne_points(tx, ty, labels):
+def visualize_tsne_points(tx, ty, labels, epoch=0, plot_figure=False, dir_save_fig=''):
     # initialize matplotlib plot
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -47,5 +60,20 @@ def visualize_tsne_points(tx, ty, labels):
     # build a legend using the labels we set previously
     ax.legend(loc='best')
 
-    # finally, show the plot
-    plt.show()
+
+    if plot_figure is True:
+        plt.show()
+
+    if dir_save_fig == '':
+        dir_save_figure = os.getcwd() + f'/tsne_points_epoch_{epoch}.png'
+
+    else:
+        if not dir_save_fig.endswith('.png'):
+            dir_save_figure = dir_save_fig + f'tsne_points_epoch_{epoch}.png'
+        else:
+            dir_save_figure = dir_save_fig
+
+    print(f'figure saved at: {dir_save_figure}')
+
+    plt.savefig(dir_save_figure)
+    plt.close()
