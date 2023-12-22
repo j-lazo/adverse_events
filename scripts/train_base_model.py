@@ -1,6 +1,6 @@
 import time
 import os
-import load_data as dam
+import utils.data_management as dam
 from models.classification_models import *
 import datetime
 import numpy as np
@@ -12,60 +12,43 @@ from absl import app, flags
 from absl.flags import FLAGS
 
 
-def eager_train(model, train_dataset, epochs, batch_size):
-    # Instantiate an optimizer to train the model.
-    optimizer = tf.keras.optimizers.SGD(learning_rate=1e-3)
-    # Instantiate a loss function.
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-
-    # Prepare the metrics.
-    train_acc_metric = tf.keras.metrics.SparseCategoricalAccuracy()
-    val_acc_metric = tf.keras.metrics.SparseCategoricalAccuracy()
-
-    for epoch in range(epochs):
-        print("\nStart of epoch %d" % (epoch,))
-        # Iterate over the batches of the dataset.
-        for step, (x_batch_train, y_batch_train) in enumerate(train_dataset):
-            with tf.GradientTape() as tape:
-
-                logits = model(x_batch_train, training=True)
-                # Compute the loss value for this minibatch.
-                loss_value = loss_fn(y_batch_train, logits)
-
-                # Use the gradient tape to automatically retrieve
-                # the gradients of the trainable variables with respect to the loss.
-                grads = tape.gradient(loss_value, model.trainable_weights)
-
-                # Run one step of gradient descent by updating
-                # the value of the variables to minimize the loss.
-                optimizer.apply_gradients(zip(grads, model.trainable_weights))
-
-                # Log every 200 batches.
-                if step % 200 == 0:
-                    print(
-                        "Training loss (for one batch) at step %d: %.4f"
-                        % (step, float(loss_value))
-                    )
-                    print("Seen so far: %s samples" % ((step + 1) * batch_size))
-
-
-def custom_training(model_name, path_train_dataset, path_val_dataset, max_epochs, patience=15, batch_size=2,
+def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet101',
                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
                      path_test_data=''):
+    @tf.function
+    def train_step(images, labels):
+        with tf.GradientTape() as tape:
+            predictions = model(images, training=True)
+            t_loss = loss_fn(y_true=labels, y_pred=predictions)
+            print(t_loss)
+        gradients = tape.gradient(t_loss, model.trainable_variables)
+        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
 
-    train_dataset_dict = dam.load_dataset_from_directory(path_train_dataset)
-    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224],
-                                          batch_size=batch_size)
-    unique_classes = np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()])
+        train_loss_val = train_loss(t_loss)
+        train_accuracy_val = train_accuracy(labels, predictions)
+        return train_loss_val, train_accuracy_val
 
-    valid_dataset_dict = dam.load_dataset_from_directory(path_val_dataset)
-    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=True, input_size=[224, 224],
-                                              batch_size=batch_size)
+    @tf.function
+    def valid_step(images, labels):
+        # pred_teacher = teacher_model(images, training=False)
+        # labels = tf.argmax(pred_teacher, axis=1)
+        predictions = model(images, training=False)
+        v_loss = loss_fn(labels, predictions)
+        val_loss = valid_loss(v_loss)
+        val_acc = valid_accuracy(labels, predictions)
+
+        return val_loss, val_acc
+
+    @tf.function
+    def prediction_step(images):
+        predictions = model(images, training=False)
+        return predictions
+
 
     if model_name == 'simple_classifier':
-        model = simple_classifier(len(unique_classes), backbone=backbone_network)
+        model = simple_classifier(len(num_out_layer), backbone=backbone_network)
         model.summary()
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
 
@@ -95,41 +78,18 @@ def custom_training(model_name, path_train_dataset, path_val_dataset, max_epochs
     # if results experiment doesn't exist create it
     if not os.path.isdir(results_directory):
         os.mkdir(results_directory)
+    else:
+        count = 1
+        while os.path.isdir(results_directory):
+            results_directory = ''.join([results_dir, '/', new_results_id, '-', str(count), '/'])
+            count += 1
+        os.mkdir(results_directory)
 
     path_experiment_information = os.path.join(results_directory, 'experiment_information.yaml')
     dam.save_yaml(path_experiment_information, information_experiment)
 
     train_summary_writer = tf.summary.create_file_writer(os.path.join(results_directory, 'summaries', 'train'))
     val_summary_writer = tf.summary.create_file_writer(os.path.join(results_directory, 'summaries', 'val'))
-
-    @tf.function
-    def train_step(images, labels):
-        with tf.GradientTape() as tape:
-            predictions = model(images, training=True)
-            t_loss = loss_fn(y_true=labels, y_pred=predictions)
-            print(t_loss)
-        gradients = tape.gradient(t_loss, model.trainable_variables)
-        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
-
-        train_loss_val = train_loss(t_loss)
-        train_accuracy_val = train_accuracy(labels, predictions)
-        return train_loss_val, train_accuracy_val
-
-    @tf.function
-    def valid_step(images, labels):
-        # pred_teacher = teacher_model(images, training=False)
-        # labels = tf.argmax(pred_teacher, axis=1)
-        predictions = model(images, training=False)
-        v_loss = loss_fn(labels, predictions)
-        val_loss = valid_loss(v_loss)
-        val_acc = valid_accuracy(labels, predictions)
-
-        return val_loss, val_acc
-
-    @tf.function
-    def prediction_step(images):
-        predictions = model(images, training=False)
-        return predictions
 
     patience = patience
     wait = 0
@@ -244,12 +204,15 @@ def custom_training(model_name, path_train_dataset, path_val_dataset, max_epochs
 
 
 def main(_argv):
-
+    institution_folders_frames = {'stras': 'stras_by70', 'bern': 'bern_by70'}
+    institution_folders_annotations = {'stras': 'stras_70', 'bern': 'bern_70'}
     physical_devices = tf.config.list_physical_devices('GPU')
     print("Num GPUs:", len(physical_devices))
 
-    path_dataset = FLAGS.path_train_dataset
-    path_val_dataset = FLAGS.path_val_dataset
+    path_dataset = FLAGS.path_dataset
+    path_annotations_dataset = FLAGS.path_annotations
+    data_center = FLAGS.data_center
+    fold = FLAGS.fold
     type_training = FLAGS.type_training
     name_model = FLAGS.name_model
     batch_size = FLAGS.batch_size
@@ -262,30 +225,51 @@ def main(_argv):
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
 
-    if type_training == 'eager_training':
-        dataset_dict = dam.load_dataset_from_directory(path_dataset)
-        unique_classes = np.unique([dataset_dict[k]['class'] for k in dataset_dict.keys()])
-        tf_ds = dam.make_tf_image_dataset(dataset_dict, training_mode=True, input_size=[224, 224], batch_size=batch_size)
-        model = simple_classifier(len(unique_classes))
-        model.summary()
-        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-        eager_train(model, tf_ds, epochs, batch_size)
+    if data_center == 'both':
+        pass
+    else:
+        if data_center == 'stras':
+            other_data_center = 'bern'
+        elif data_center == 'bern':
+            other_data_center = 'stras'
 
-    elif type_training == 'custom_training':
+        path_frames = os.path.join(path_dataset, institution_folders_frames[data_center], 'frames')
+        path_cross_center_frames = os.path.join(path_dataset, institution_folders_frames[other_data_center], 'frames')
+        path_annotations = os.path.join(path_annotations_dataset, institution_folders_annotations[data_center])
+        cross_center_annotations = os.path.join(path_annotations_dataset,
+                                                institution_folders_annotations[other_data_center])
 
-        list_folders = [f for f in os.listdir(path_dataset) if os.path.isdir(os.path.join(path_dataset, f))]
-        if path_val_dataset:
-            path_validation_dataset = path_val_dataset
-            path_train_dataset = path_dataset
-        elif 'val' in list_folders:
-            path_validation_dataset = os.path.join(path_dataset, 'val')
-            path_train_dataset = os.path.join(path_dataset, 'train')
-        else:
-            path_train_dataset = path_dataset
-            path_validation_dataset = path_dataset
+        path_train_annotations = os.path.join(path_annotations, 'train')
+        path_val_annotations = os.path.join(path_annotations, 'val')
+        path_test_annotations_1 = os.path.join(path_annotations, 'test')
+        path_test_annotations_2 = os.path.join(cross_center_annotations, 'test')
 
-        custom_training(name_model, path_train_dataset, path_validation_dataset, epochs, patience=15, batch_size=batch_size, backbone_network=backbone,
-                         loss=loss, metrics=metrics, optimizer=optimizer, path_test_data=path_dataset)
+
+        train_annotations_file_name = [f for f in os.listdir(path_train_annotations) if fold + '.pickle' in f][0]
+        val_annotations_file_name = [f for f in os.listdir(path_val_annotations) if fold + '.pickle' in f][0]
+        test_annotations_file_name_1 = [f for f in os.listdir(path_test_annotations_1) if fold + '.pickle' in f][0]
+        test_annotations_file_name_2 = [f for f in os.listdir(path_test_annotations_2) if fold + '.pickle' in f][0]
+
+        train_dataset_dict = dam.load_dataset_from_directory(train_annotations_file_name, path_frames)
+        valid_dataset_dict = dam.load_dataset_from_directory(val_annotations_file_name, path_frames)
+
+        test_dataset_dict_1 = dam.load_dataset_from_directory(test_annotations_file_name, path_frames)
+
+
+    if test
+
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224],
+                                          batch_size=batch_size)
+    unique_classes = np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()])
+
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=True, input_size=[224, 224],
+                                          batch_size=batch_size)
+
+    if type_training == 'custom_training':
+
+        custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
+                        batch_size=batch_size, backbone_network=backbone, loss=loss, metrics=metrics,
+                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir)
     else:
         print(f'{type_training} not in options!')
 
@@ -293,15 +277,18 @@ def main(_argv):
 if __name__ == '__main__':
 
     flags.DEFINE_string('name_model', '', 'name of the model')
-    flags.DEFINE_string('path_train_dataset', '', 'directory training dataset')
-    flags.DEFINE_string('path_val_dataset', '', 'directory validation dataset')
-    flags.DEFINE_string('type_training', '', 'eager_train or custom_training')
-    flags.DEFINE_integer('batch_size', 8, 'batch size')
+    flags.DEFINE_string('path_dataset', '', 'directory dataset')
+    flags.DEFINE_string('path_annotations', '', 'directory annotations')
+    flags.DEFINE_string('data_center', 'both', 'which sub-division to use [stras, bern] or both')
+    flags.DEFINE_string('fold', '1', 'fold od the dataset')
+    flags.DEFINE_integer('clips_size', 5, 'number of clips')
+    flags.DEFINE_string('type_training', 'custom_training', 'eager_train or custom_training')
+    flags.DEFINE_integer('batch_size',8,'batch size')
     flags.DEFINE_integer('epochs', 1, 'epochs')
     flags.DEFINE_string('results_dir', os.path.join(os.getcwd(), 'results'), 'directory to save the results')
     flags.DEFINE_float('learning_rate', 0.001, 'learning rate')
     flags.DEFINE_boolean('analyze_data', True, 'analyze the data after the experiment')
-    flags.DEFINE_string('backbone', 'resnet101', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
+    flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
     try:
         app.run(main)
     except SystemExit:
