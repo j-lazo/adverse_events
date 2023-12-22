@@ -11,9 +11,13 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 
+input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
+                          'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
+                          'densenet121': (224, 224), 'xception': (299, 299),
+                          'resnet152': (224, 224), 'densenet201': (224, 224)}
 
 def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
-                     learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet101',
+                     learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
                      path_test_data=''):
@@ -22,7 +26,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         with tf.GradientTape() as tape:
             predictions = model(images, training=True)
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
-            print(t_loss)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
 
@@ -32,8 +35,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     @tf.function
     def valid_step(images, labels):
-        # pred_teacher = teacher_model(images, training=False)
-        # labels = tf.argmax(pred_teacher, axis=1)
         predictions = model(images, training=False)
         v_loss = loss_fn(labels, predictions)
         val_loss = valid_loss(v_loss)
@@ -45,7 +46,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     def prediction_step(images):
         predictions = model(images, training=False)
         return predictions
-
 
     if model_name == 'simple_classifier':
         model = simple_classifier(len(num_out_layer), backbone=backbone_network)
@@ -226,7 +226,33 @@ def main(_argv):
                tf.keras.metrics.Recall(name='recall')]
 
     if data_center == 'both':
-        pass
+        train_dataset_dict = {}
+        valid_dataset_dict = {}
+        test_dataset_dict = {}
+        for center in institution_folders_frames:
+            path_frames = os.path.join(path_dataset, institution_folders_frames[center], 'frames')
+            path_annotations = os.path.join(path_annotations_dataset, institution_folders_annotations[center])
+
+            path_train_annotations = os.path.join(path_annotations, 'train')
+            path_val_annotations = os.path.join(path_annotations, 'val')
+            path_test_annotations = os.path.join(path_annotations, 'test')
+
+            train_annotations_file_name = [f for f in os.listdir(path_train_annotations) if fold + '.pickle' in f][0]
+            val_annotations_file_name = [f for f in os.listdir(path_val_annotations) if fold + '.pickle' in f][0]
+            test_annotations_file_name = [f for f in os.listdir(path_test_annotations) if fold + '.pickle' in f][0]
+
+            train_annotations_file_path = os.path.join(path_train_annotations, train_annotations_file_name)
+            val_annotations_file_path = os.path.join(path_val_annotations, val_annotations_file_name)
+            test_annotations_file_path = os.path.join(path_test_annotations, test_annotations_file_name)
+
+            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path)
+            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path)
+            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path)
+
+            train_dataset_dict = {**train_dataset_dict, **temp_train_dataset_dict}
+            valid_dataset_dict = {**valid_dataset_dict, **temp_valid_dataset_dict}
+            test_dataset_dict = {**test_dataset_dict, **temp_test_dataset_dict}
+
     else:
         if data_center == 'stras':
             other_data_center = 'bern'
@@ -244,32 +270,34 @@ def main(_argv):
         path_test_annotations_1 = os.path.join(path_annotations, 'test')
         path_test_annotations_2 = os.path.join(cross_center_annotations, 'test')
 
-
         train_annotations_file_name = [f for f in os.listdir(path_train_annotations) if fold + '.pickle' in f][0]
         val_annotations_file_name = [f for f in os.listdir(path_val_annotations) if fold + '.pickle' in f][0]
         test_annotations_file_name_1 = [f for f in os.listdir(path_test_annotations_1) if fold + '.pickle' in f][0]
         test_annotations_file_name_2 = [f for f in os.listdir(path_test_annotations_2) if fold + '.pickle' in f][0]
 
-        train_dataset_dict = dam.load_dataset_from_directory(train_annotations_file_name, path_frames)
-        valid_dataset_dict = dam.load_dataset_from_directory(val_annotations_file_name, path_frames)
+        train_annotations_file_path = os.path.join(path_train_annotations, train_annotations_file_name)
+        val_annotations_file_path = os.path.join(path_val_annotations, val_annotations_file_name)
+        test_annotations_file_path_1 = os.path.join(path_test_annotations_1, test_annotations_file_name_1)
+        test_annotations_file_path_2 = os.path.join(path_test_annotations_2, test_annotations_file_name_2)
 
-        test_dataset_dict_1 = dam.load_dataset_from_directory(test_annotations_file_name, path_frames)
+        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path)
+        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path)
 
+        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1)
+        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2)
+        test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
-    if test
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224], batch_size=batch_size)
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
+    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
 
-    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224],
-                                          batch_size=batch_size)
     unique_classes = np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()])
-
-    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=True, input_size=[224, 224],
-                                          batch_size=batch_size)
 
     if type_training == 'custom_training':
 
         custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
                         batch_size=batch_size, backbone_network=backbone, loss=loss, metrics=metrics,
-                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir)
+                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir, )
     else:
         print(f'{type_training} not in options!')
 
@@ -289,6 +317,7 @@ if __name__ == '__main__':
     flags.DEFINE_float('learning_rate', 0.001, 'learning rate')
     flags.DEFINE_boolean('analyze_data', True, 'analyze the data after the experiment')
     flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
+    flags.DEFINE_string('pretrained_weights', '','pretrained weights for the backbone either [''(none), "imagenet", "path_to_weights"]')
     try:
         app.run(main)
     except SystemExit:
