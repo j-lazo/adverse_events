@@ -81,7 +81,51 @@ def save_yaml(path, data, **kwargs):
         yaml.dump(data, f, **kwargs)
 
 
-def load_dataset_from_directory(path_frames, path_annotations, items_to_use=['Overall', 'Bleeding'],
+def get_bleeding_level(dict_frame):
+    bleeding_level = 0
+    if dict_frame['Bleeding - 1'] == 1:
+        bleeding_level = 1
+    elif dict_frame['Bleeding - 2'] == 1:
+        bleeding_level = 2
+    elif dict_frame['Bleeding - 3'] == 1:
+        bleeding_level = 3
+    elif dict_frame['Bleeding - 4'] == 1:
+        bleeding_level = 4
+    elif dict_frame['Bleeding - 5'] == 1:
+        bleeding_level = 5
+
+    return bleeding_level
+
+def get_mi_level(dict_frame):
+    mi_level = 0
+    if dict_frame['Mechanical injury - 1'] == 1:
+        mi_level = 1
+    elif dict_frame['Mechanical injury - 2'] == 1:
+        mi_level = 2
+    elif dict_frame['Mechanical injury - 3'] == 1:
+        mi_level = 3
+    elif dict_frame['Mechanical injury - 4'] == 1:
+        mi_level = 4
+    elif dict_frame['Mechanical injury - 5'] == 1:
+        mi_level = 5
+    return mi_level
+
+def get_ti_level(dict_frame):
+    ti_level = 0
+    if dict_frame['Thermal injury - 1'] == 1:
+        ti_level = 1
+    elif dict_frame['Thermal injury - 2'] == 1:
+        ti_level = 2
+    elif dict_frame['Thermal injury - 3'] == 1:
+        ti_level = 3
+    elif dict_frame['Thermal injury - 4'] == 1:
+        ti_level = 4
+    elif dict_frame['Thermal injury - 5'] == 1:
+        ti_level = 5
+    return ti_level
+
+
+def load_dataset_from_directory(path_frames, path_annotations, output_type='binary',
                                 class_condition='', num_samples=None, ratio=None):
     """
         Give a path, creates two lists with the
@@ -118,7 +162,8 @@ def load_dataset_from_directory(path_frames, path_annotations, items_to_use=['Ov
     pickleInfo = pickle.load(open(path_annotations, "rb"))
     # read dictionary of list (cases) each list has a dictionary of frames
     list_cases = pickleInfo.keys()
-    for case in tqdm.tqdm(list_cases, desc=f"Loading data from: {path_annotations}"):
+    print(f'Reading dir:{path_annotations}')
+    for case in tqdm.tqdm(list_cases, desc=f"Loading data"):
         annotated_frames = pickleInfo[case]
         frames_IDs = [d['Frame_id'] for d in annotated_frames]
         path_case = os.path.join(path_frames, case)
@@ -127,23 +172,32 @@ def load_dataset_from_directory(path_frames, path_annotations, items_to_use=['Ov
         list_imgs = [f.split('.')[0] for f in list_imgs if f.split('.')[0] in frames_IDs]
         list_real_imgs = [f for f in annotated_frames if
                           os.path.isfile(os.path.join(path_frames, case, f['Frame_id'] + '.jpg'))]
-        dict_frames = {case + d['Frame_id']: {'case_id': case,
-                                              'Frame_id': d['Frame_id'],
-                                              'Path_img': os.path.join(path_frames, case, d['Frame_id'] + '.jpg'),
-                                              'Overall': d['Overall'],
-                                              'Bleeding': d['Bleeding'],
-                                              'Event_ID': d['Event_ID']
-                                              } for d in annotated_frames if d['Frame_id'] in list_imgs}
-        if class_condition:
+
+        if output_type == 'binary':
             dict_frames = {case + d['Frame_id']: {'case_id': case,
                                                   'Frame_id': d['Frame_id'],
                                                   'Path_img': os.path.join(path_frames, case, d['Frame_id'] + '.jpg'),
+                                                  'Phase_gt': d['Phase_gt'],
+                                                  'Step_gt': d['Step_gt'],
                                                   'Overall': d['Overall'],
                                                   'Bleeding': d['Bleeding'],
+                                                  'Mechanical injury': d['Mechanical injury'],
+                                                  'Thermal injury': d['Thermal injury'],
                                                   'Event_ID': d['Event_ID']
-                                                  } for d in annotated_frames if d['Frame_id'] in list_imgs and
-                           d[class_condition] == 1 and os.path.isfile(
-                os.path.join(path_frames, case, d['Frame_id'] + '.jpg'))}
+                                                  } for d in annotated_frames if d['Frame_id'] in list_imgs}
+        elif output_type == 'level':
+
+            dict_frames = {case + d['Frame_id']: {'case_id': case,
+                                                  'Frame_id': d['Frame_id'],
+                                                  'Path_img': os.path.join(path_frames, case, d['Frame_id'] + '.jpg'),
+                                                  'Phase_gt': d['Phase_gt'],
+                                                  'Step_gt': d['Step_gt'],
+                                                  'Overall': d['Overall'],
+                                                  'Bleeding': get_bleeding_level(d),
+                                                  'Mechanical injury': get_mi_level(d),
+                                                  'Thermal injury': get_ti_level(d),
+                                                  'Event_ID': d['Event_ID']
+                                                  } for d in annotated_frames if d['Frame_id'] in list_imgs}
 
         output_dict = {**output_dict, **dict_frames}
         # option b) with ChainMap, check which one is more efficient
@@ -370,7 +424,6 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
                     num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False, input_size=[255,255]):
 
     list_files = list(dictionary_labels.keys())
-
     def decode_image(file_name):
         image = tf.io.read_file(file_name)
         if tf.io.is_jpeg(image):
