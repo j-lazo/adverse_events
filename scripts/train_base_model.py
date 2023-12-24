@@ -213,6 +213,8 @@ def main(_argv):
     path_annotations_dataset = FLAGS.path_annotations
     data_center = FLAGS.data_center
     fold = FLAGS.fold
+    output_type = FLAGS.output_type
+    selected_classes = FLAGS.selected_classes
     type_training = FLAGS.type_training
     name_model = FLAGS.name_model
     batch_size = FLAGS.batch_size
@@ -245,9 +247,9 @@ def main(_argv):
             val_annotations_file_path = os.path.join(path_val_annotations, val_annotations_file_name)
             test_annotations_file_path = os.path.join(path_test_annotations, test_annotations_file_name)
 
-            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path)
-            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path)
-            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path)
+            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type)
+            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type)
+            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path, output_type=output_type)
 
             train_dataset_dict = {**train_dataset_dict, **temp_train_dataset_dict}
             valid_dataset_dict = {**valid_dataset_dict, **temp_valid_dataset_dict}
@@ -280,18 +282,18 @@ def main(_argv):
         test_annotations_file_path_1 = os.path.join(path_test_annotations_1, test_annotations_file_name_1)
         test_annotations_file_path_2 = os.path.join(path_test_annotations_2, test_annotations_file_name_2)
 
-        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path)
-        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path)
+        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type)
+        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type)
 
-        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1)
-        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2)
+        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type)
+        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
     train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224], batch_size=batch_size)
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
 
-    unique_classes = np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()])
+    unique_classes = len(selected_classes)
 
     if type_training == 'custom_training':
 
@@ -305,10 +307,12 @@ def main(_argv):
 if __name__ == '__main__':
 
     flags.DEFINE_string('name_model', '', 'name of the model')
+    flags.DEFINE_list('selected_classes', '[Overall, Bleeding, Mechanical injury, Thermal injury]', 'classes selected')
     flags.DEFINE_string('path_dataset', '', 'directory dataset')
     flags.DEFINE_string('path_annotations', '', 'directory annotations')
     flags.DEFINE_string('data_center', 'both', 'which sub-division to use [stras, bern] or both')
     flags.DEFINE_string('fold', '1', 'fold od the dataset')
+    flags.DEFINE_string('output_type', 'binary', 'binary or level')
     flags.DEFINE_integer('clips_size', 5, 'number of clips')
     flags.DEFINE_string('type_training', 'custom_training', 'eager_train or custom_training')
     flags.DEFINE_integer('batch_size',8,'batch size')
