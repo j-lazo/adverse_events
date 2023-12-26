@@ -99,17 +99,18 @@ def load_pretrained_backbones(name_model, weights='imagenet', include_top=False,
     return new_base_model
 
 
-def simple_classifier(num_classes, backbone='resnet101', input_size=input_sizes_models['resnet101']):
-    input_image = keras.Input(shape=input_size + (3,), name="image_input")
+def simple_classifier(num_classes, backbone='resnet101', input_size=input_sizes_models['resnet101'],
+                      train_backbone=False):
 
+    input_image = keras.Input(shape=input_size + (3,), name="image_input")
     x = tf.image.resize(input_image, input_sizes_models[backbone], method='area')
     x = get_preprocess_input_backbone(backbone, x)
     base_model = load_pretrained_backbones(backbone)
-    for layer in base_model.layers:
-        layer.trainable = False
+    if train_backbone is False:
+        for layer in base_model.layers:
+            layer.trainable = False
 
     x = base_model(x)
-    x = keras.layers.GlobalAveragePooling2D()(x)
     x = keras.layers.Dense(1024, activation='relu')(x)
     x = keras.layers.Dropout(0.5)(x)
     x = keras.layers.Dense(512, activation='relu')(x)
@@ -117,3 +118,27 @@ def simple_classifier(num_classes, backbone='resnet101', input_size=input_sizes_
     output_layer = keras.layers.Dense(num_classes, activation='softmax')(x)
 
     return keras.Model(inputs=input_image, outputs=output_layer, name=f'pretrained_model_{backbone}')
+
+
+def two_outputs_classifier(num_classes_out_1=11, num_classes_out_2=44, backbone='resnet101',
+                           input_size=input_sizes_models['resnet101'], pretrained_backbone=False,
+                           train_backbone=False):
+
+    input_image = keras.Input(shape=input_size + (3,), name="image_input")
+    x = tf.image.resize(input_image, input_sizes_models[backbone], method='area')
+    x = get_preprocess_input_backbone(backbone, x)
+    base_model = load_pretrained_backbones(backbone)
+    if train_backbone is False:
+        for layer in base_model.layers:
+            layer.trainable = False
+
+    x = base_model(x)
+    x1 = tf.keras.layers.Dense(2048, activation=None, name='y_p')(x)
+    x1 = tf.keras.layers.Flatten()(x1)
+    x1 = tf.keras.layers.Dense(num_classes_out_1, activation=None, name='y_pahse')(x1)
+
+    x2 = tf.keras.layers.Dense(2048, activation=None, name='y_s')(x)
+    x2 = tf.keras.layers.Flatten()(x2)
+    x2 = tf.keras.layers.Dense(num_classes_out_2, activation=None, name='y_step')(x2)
+
+    return keras.Model(inputs=input_image, outputs=[x1, x2], name=f'pretrained_model_{backbone}')
