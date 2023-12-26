@@ -420,10 +420,9 @@ class FrameGenerator:
             yield image_batch, labels
 
 
-def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
+def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch_size=2, training_mode=False,
                     num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False, input_size=[255,255]):
 
-    list_files = list(dictionary_labels.keys())
     def decode_image(file_name):
         image = tf.io.read_file(file_name)
         if tf.io.is_jpeg(image):
@@ -443,10 +442,10 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
         img = tf.keras.layers.RandomRotation(rand_degree(lower, upper), fill_mode='nearest')(img)
         return img
 
-    def parse_image(filename):
+    def parse_image(filename, img_size=[224,224]):
 
         image = decode_image(filename)
-        image = tf.image.resize(image, [250, 250])
+        image = tf.image.resize(image, img_size)
 
         if training_mode:
             image = tf.image.random_flip_left_right(image)
@@ -463,6 +462,7 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
       dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
       return dataset
 
+    list_files = list(dictionary_labels.keys())
     path_imgs = list()
     images_class = list()
     img_paths = list()
@@ -472,28 +472,32 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
 
     for img_id in list_files:
         path_imgs.append(dictionary_labels[img_id]['Path_img'])
-        images_class.append(dictionary_labels[img_id]['Bleeding'])
+        extracted_labels = [dictionary_labels[img_id][label] for label in selected_labels]
+        images_class.append(extracted_labels)
 
     filenames_ds = tf.data.Dataset.from_tensor_slices(path_imgs)
-    images_ds = filenames_ds.map(parse_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    images_ds = filenames_ds.map(parse_image,  num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    unique_classes = list(np.unique(images_class))
-    num_classes = len(unique_classes)
-    network_labels = list()
-    labels = [unique_classes.index(v) for v in images_class]
-    labels_ds = tf.data.Dataset.from_tensor_slices(labels)
+    if len(images_class[0]) > 1:
+        labels_ds = tf.data.Dataset.from_tensor_slices(images_class)
+    else:
+        unique_classes = list(np.unique(images_class))
+        labels = [unique_classes.index(v) for v in images_class]
+        labels_ds = tf.data.Dataset.from_tensor_slices(labels)
+
 
     if image_paths is True:
         ds = tf.data.Dataset.zip((images_ds, labels_ds), filenames_ds)
     else:
         ds = tf.data.Dataset.zip((images_ds, labels_ds))
+
     if training_mode:
         ds = configure_for_performance(ds)
     else:
         ds = ds.batch(batch_size)
 
     print(f'TF dataset with {len(path_imgs)} elements')
-    return ds, len(images_ds)
+    return ds
 
 
 #def analyze_video_dataset(dictionary_labels):

@@ -16,9 +16,13 @@ from collections import ChainMap
 import cv2
 from matplotlib import pyplot as plt
 
+input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
+                          'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
+                          'densenet121': (224, 224), 'xception': (299, 299),
+                          'resnet152': (224, 224), 'densenet201': (224, 224)}
 
 def load_dataset_from_directory(path_frames, path_annotations, items_to_use=['Overall', 'Bleeding'],
-                                class_condition=''):
+                                class_condition='', num_samples=None, ratio=None):
     """
         Give a path, creates two lists with the
         Parameters
@@ -82,8 +86,39 @@ def load_dataset_from_directory(path_frames, path_annotations, items_to_use=['Ov
                 os.path.join(path_frames, case, d['Frame_id'] + '.jpg'))}
 
         output_dict = {**output_dict, **dict_frames}
-        # option b with ChainMap, check which one is more efficient
+        # option b) with ChainMap, check which one is more efficient
         # output_dict = dict(ChainMap({}, output_dict, dict_frames))
+
+    if num_samples:
+        new_output_dict = {}
+        keys_dict = list(output_dict.keys())
+        total_samples = 0
+        temp_dict = {}
+        if ratio:
+            num_neg = 0
+            num_pos = 0
+            total_neg = int(num_samples*ratio)
+            total_pos = num_samples - total_neg
+            while num_pos + num_neg <= num_samples:
+                r = random.choice(keys_dict)
+
+                if output_dict[r]['Overall'] == 1 and num_pos <= total_pos:
+                    temp_dict[r] = output_dict[r]
+                    num_pos += 1
+                elif output_dict[r]['Overall'] == 0 and num_neg <= total_neg:
+                    temp_dict[r] = output_dict[r]
+                    num_neg += 1
+
+            new_output_dict = {**new_output_dict, **temp_dict}
+        else:
+
+            while total_samples <= num_samples:
+                r = random.choice(keys_dict)
+                temp_dict[r] = output_dict[r]
+                new_output_dict = {**new_output_dict, **output_dict[r]}
+                total_samples += 1
+
+        output_dict = copy.copy(new_output_dict)
 
     print(f'Dataset with {len(output_dict)} elements')
     return output_dict
@@ -256,16 +291,23 @@ class FrameGenerator:
         #list_all_labels = tf.data.Dataset.from_tensor_slices(list_all_labels)
         self.pairs = list(zip(list_all_events, list_all_labels))
 
+
     def __call__(self):
         if self.training:
             random.shuffle(self.pairs)
 
+        if isinstance(self.output_size, str):
+            img_size = input_sizes_models[self.output_size]
+        else:
+            img_size = self.output_size
+
         for paths, labels in self.pairs:
-            image_batch = load_image_batch(paths, self.output_size)
+            image_batch = load_image_batch(paths, img_size)
             yield image_batch, labels
 
-def make_tf_image_dataset(dictionary_labels, labels_list, batch_size=2, training_mode=False,
-                    num_repeat=None, custom_training=False, ignore_labels=False):
+
+def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
+                    num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False):
 
     list_files = list(dictionary_labels.keys())
 
@@ -291,7 +333,7 @@ def make_tf_image_dataset(dictionary_labels, labels_list, batch_size=2, training
     def parse_image(filename):
 
         image = decode_image(filename)
-        image = tf.image.resize(image, [256, 256])
+        image = tf.image.resize(image, [250, 250])
 
         if training_mode:
             image = tf.image.random_flip_left_right(image)
@@ -324,21 +366,21 @@ def make_tf_image_dataset(dictionary_labels, labels_list, batch_size=2, training
 
     unique_classes = list(np.unique(images_class))
     num_classes = len(unique_classes)
-    labels = [unique_classes.index(v) for v in images_class]
     network_labels = list()
-
+    labels = [unique_classes.index(v) for v in images_class]
     labels_ds = tf.data.Dataset.from_tensor_slices(labels)
-    #path_files = tf.data.Dataset.from_tensor_slices()
 
-    ds = tf.data.Dataset.zip((images_ds, labels_ds), filenames_ds)
-
+    if image_paths is True:
+        ds = tf.data.Dataset.zip((images_ds, labels_ds), filenames_ds)
+    else:
+        ds = tf.data.Dataset.zip((images_ds, labels_ds))
     if training_mode:
         ds = configure_for_performance(ds)
     else:
         ds = ds.batch(batch_size)
 
     print(f'TF dataset with {len(path_imgs)} elements')
-    return ds, num_classes
+    return ds, len(images_ds)
 
 
 #def analyze_video_dataset(dictionary_labels):
