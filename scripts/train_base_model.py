@@ -11,6 +11,7 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 
+
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
                           'densenet121': (224, 224), 'xception': (299, 299),
@@ -20,11 +21,15 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     path_test_data=''):
-    @tf.function
+                     path_test_data='', output_type='', selected_classes=''):
+    #@tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
             predictions = model(images, training=True)
+            print('Predictions')
+            print(predictions)
+            print('labels')
+            print(labels)
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
@@ -52,6 +57,19 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         model.summary()
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
 
+    elif model_name == 'two_outputs_classifier':
+        num_phases = 11
+        num_steps = 44
+        model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network)
+        model.summary()
+        model.compile(optimizer=optimizer,
+                           loss={'y_pahse': 'binary_crossentropy',
+                                 'y_step': 'mse'
+                                 },
+                           metrics={'y_pahse': 'accuracy',
+                                    'y_step': 'accuracy'
+                                    })
+
     loss_fn = loss
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
@@ -69,17 +87,20 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     training_date_time = datetime.datetime.now()
     information_experiment = {'experiment folder': new_results_id,
                               'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
-                              'name model': 'semi_supervised_resnet101',
+                              'name model': model_name,
                               'backbone': backbone_model,
                               'batch size': int(batch_size),
-                              'learning rate': float(learning_rate)}
+                              'learning rate': float(learning_rate),
+                              'output type': output_type,
+                              'selected classes': selected_classes,
+                              }
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
     # if results experiment doesn't exist create it
     if not os.path.isdir(results_directory):
         os.mkdir(results_directory)
     else:
-        count = 1
+        count = 0
         while os.path.isdir(results_directory):
             results_directory = ''.join([results_dir, '/', new_results_id, '-', str(count), '/'])
             count += 1
@@ -167,7 +188,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         # 2Do load saved model
 
         test_dataset_dict = dam.load_dataset_from_directory(path_test_data)
-        test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=1)
+        #test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=ls
+        #training_mode=False, input_size=input_sizes_models[backbone_network], batch_size=1)
 
         list_images = [test_dataset_dict[x]['Frame_id'] for x in test_dataset_dict.keys()]
         list_labels = [test_dataset_dict[x]['class'] for x in test_dataset_dict.keys()]
@@ -203,6 +225,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                                  dir_save_fig=dir_conf_matrix)
 
 
+def correct_labels(list_labels):
+    out_list = [s.replace('-', ' ') for s in list_labels]
+    return out_list
+
 def main(_argv):
     institution_folders_frames = {'stras': 'stras_by70', 'bern': 'bern_by70'}
     institution_folders_annotations = {'stras': 'stras_70', 'bern': 'bern_70'}
@@ -214,14 +240,14 @@ def main(_argv):
     data_center = FLAGS.data_center
     fold = FLAGS.fold
     output_type = FLAGS.output_type
-    selected_classes = FLAGS.selected_classes
+    selected_classes = correct_labels(FLAGS.selected_classes)
     type_training = FLAGS.type_training
     name_model = FLAGS.name_model
     batch_size = FLAGS.batch_size
     epochs = FLAGS.epochs
     results_dir = FLAGS.results_dir
     learning_rate = FLAGS.learning_rate
-    backbone = FLAGS.backbone
+    backbone_network = FLAGS.backbone
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
@@ -289,17 +315,21 @@ def main(_argv):
         test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
-    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224], batch_size=batch_size)
-    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
-    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=batch_size)
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes, training_mode=True,
+                                              input_size=input_sizes_models[backbone_network], batch_size=batch_size)
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
+                                              input_size=input_sizes_models[backbone_network], batch_size=batch_size)
+    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
+                                             input_size=input_sizes_models[backbone_network], batch_size=batch_size)
 
     unique_classes = len(selected_classes)
 
     if type_training == 'custom_training':
 
         custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
-                        batch_size=batch_size, backbone_network=backbone, loss=loss, metrics=metrics,
-                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir, )
+                        batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
+                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir,
+                        output_type=output_type, selected_classes=selected_classes)
     else:
         print(f'{type_training} not in options!')
 
