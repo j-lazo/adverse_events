@@ -45,13 +45,15 @@ def compute_confusion_matrix(gt_data, predicted_data, plot_figure=False, dir_sav
     xlabel_names = list()
     for name in list_uniques:
         # if the name of the unique names is longer than 4 characters will split it
-        if len(name) > 4:
-            name_split = name.split('-')
-            new_name = ''
-            for splits in name_split:
-                new_name = new_name.join([splits[0]])
+        # 2Do check if they are string or num
+        if isinstance(name, str):
+            if len(name) > 4:
+                name_split = name.split('-')
+                new_name = ''
+                for splits in name_split:
+                    new_name = new_name.join([splits[0]])
 
-            xlabel_names.append(new_name)
+                xlabel_names.append(new_name)
         else:
             xlabel_names.append(name)
 
