@@ -421,7 +421,8 @@ class FrameGenerator:
 
 
 def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch_size=2, training_mode=False,
-                    num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False, input_size=[255,255]):
+                    num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False,
+                    input_size=[250,250]):
 
     def decode_image(file_name):
         image = tf.io.read_file(file_name)
@@ -479,12 +480,15 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
     images_ds = filenames_ds.map(parse_image,  num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     if len(images_class[0]) > 1:
-        labels_ds = tf.data.Dataset.from_tensor_slices(images_class)
+        label_1 = [tf.one_hot(v[0], 12) for v in images_class]
+        label_2 = [tf.one_hot(v[0], 45) for v in images_class]
+        labels_ds1 = tf.data.Dataset.from_tensor_slices(label_1)
+        labels_ds2 = tf.data.Dataset.from_tensor_slices(label_2)
+        labels_ds = tf.data.Dataset.zip((labels_ds1, labels_ds2))
     else:
         unique_classes = list(np.unique(images_class))
         labels = [unique_classes.index(v) for v in images_class]
         labels_ds = tf.data.Dataset.from_tensor_slices(labels)
-
 
     if image_paths is True:
         ds = tf.data.Dataset.zip((images_ds, labels_ds), filenames_ds)
