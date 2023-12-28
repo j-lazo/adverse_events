@@ -11,10 +11,9 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 
-
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
-                          'densenet121': (224, 224), 'xception': (299, 299),
+                          'densenet121': (224, 224),
                           'resnet152': (224, 224), 'densenet201': (224, 224)}
 
 
