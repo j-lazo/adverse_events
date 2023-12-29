@@ -137,8 +137,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     start_time = datetime.datetime.now()
     epoch_counter = list()
     train_loss_list = list()
+    val_loss_list = list()
     train_accuracy_list_1 = list()
     train_accuracy_list_2 = list()
+    val_accuracy_list_1 = list()
+    val_accuracy_list_2 = list()
 
     model_dir = os.path.join(results_directory, 'model_weights')
     os.mkdir(model_dir)
@@ -148,7 +151,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
         train_accuracy_list_1.append(train_accuracy_1.result().numpy())
-        train_accuracy_list_2.append(train_accuracy_2.result().numpy())
+        val_accuracy_list_2.append(train_accuracy_2.result().numpy())
+
+        val_loss_list.append(valid_loss.result().numpy())
+        val_accuracy_list_1.append(valid_accuracy_1.result().numpy())
+        val_accuracy_list_2.append(valid_accuracy_2.result().numpy())
 
         t = time.time()
         train_loss.reset_states()
@@ -160,7 +167,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         step = 0
 
         template = 'ETA: {} - epoch: {} loss: {:.5f}  acc phase: {:.5f}, acc step: {:.5f}'
-        """for x, train_labels in train_dataset:
+        for x, train_labels in train_dataset:
             step += 1
             images = x
             train_loss_value, t_acc_p, tacc_s = train_step(images, train_labels)
@@ -187,7 +194,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                                                                   train_accuracy_1.result(),
                                                                   valid_loss.result(),
                                                                   valid_accuracy_1.result(),
-                                                                  valid_accuracy_2.result()))"""
+                                                                  valid_accuracy_2.result()))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -206,6 +213,25 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
     print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+    # save history
+    header_column = list()
+    header_column.insert(0, 'epoch')
+    header_column.append('train loss')
+    header_column.append('val loss')
+    header_column.append('acc phase training')
+    header_column.append('acc step training')
+    header_column.append('acc phase val')
+    header_column.append('acc phase step')
+
+    df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+                               train_accuracy_list_1, train_accuracy_list_2,
+                               val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+
+    path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
+    df.to_csv(path_history_csv_file, index=False)
+
+    print(f'csv file with training history saved at: {path_history_csv_file}')
 
     if test_dataset:
 
@@ -283,7 +309,6 @@ def main(_argv):
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
     train_backbone = FLAGS.train_backbone
-    print('train bakcbone', train_backbone, type(train_backbone))
 
     if data_center == 'both':
         train_dataset_dict = {}
