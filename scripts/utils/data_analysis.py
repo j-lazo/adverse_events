@@ -58,7 +58,7 @@ def compute_confusion_matrix(gt_data, predicted_data, plot_figure=False, dir_sav
                 xlabel_names.append(name)
         else:
             xlabel_names.append(str(name))
-            
+
     labels = np.asarray(group_percentages).reshape(size, size)
     sns.heatmap(group_percentages, cmap='Blues', cbar=False, linewidths=.5,
                 yticklabels=list(uniques), xticklabels=list(xlabel_names), annot=labels)

@@ -78,3 +78,6 @@ class PatchEncoder(layers.Layer):
         config = super().get_config()
         config.update({"num_patches": self.num_patches})
         return config
+
+
+def build_transoformer():

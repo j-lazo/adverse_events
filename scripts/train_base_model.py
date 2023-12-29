@@ -19,24 +19,32 @@ input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': 
 
 def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
-                     loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
+                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
                      path_test_data='', output_type='', selected_classes=''):
-    #@tf.function
+    @tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
-            predictions = model(images, training=True)
-            print('Predictions')
-            print(predictions)
-            print('labels')
-            print(labels)
-            t_loss = loss_fn(y_true=labels, y_pred=predictions)
+            labels_1, labels_2 = labels
+            predictions_1, predictions_2 = model(images, training=True)
+            t_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
+            t_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
+            t_loss = tf.reduce_mean(t_loss_1) + tf.reduce_mean(t_loss_2)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
 
         train_loss_val = train_loss(t_loss)
-        train_accuracy_val = train_accuracy(labels, predictions)
-        return train_loss_val, train_accuracy_val
+        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
+        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
+        train_accuracy_val_1 = train_accuracy(labels_1, predictions_acc_1)
+        train_accuracy_val_2 = train_accuracy(labels_2, predictions_acc_2)
+        print(train_accuracy_val_1)
+        print(train_accuracy_val_2)
+        train_accuracy_val = (train_accuracy_val_1 + train_accuracy_val_2)/2
+        #tf.reduce_mean(train_accuracy_val_1) +  tf.reduce_mean(train_accuracy_val_2)
+
+        return train_loss_val, train_accuracy_val_1, train_accuracy_val_2
+        #return train_loss_val, train_accuracy_val,
 
     @tf.function
     def valid_step(images, labels):
@@ -56,24 +64,28 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         model = simple_classifier(len(num_out_layer), backbone=backbone_network)
         model.summary()
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
+        loss_fn = loss
 
     elif model_name == 'two_outputs_classifier':
-        num_phases = 11
-        num_steps = 44
+        num_phases = 12
+        num_steps = 45
         model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network)
         model.summary()
         model.compile(optimizer=optimizer,
-                           loss={'y_pahse': 'binary_crossentropy',
-                                 'y_step': 'mse'
+                           loss={'y_pahse': 'categorical_crossentropy',
+                                 'y_step': 'categorical_crossentropy'
                                  },
                            metrics={'y_pahse': 'accuracy',
                                     'y_step': 'accuracy'
                                     })
+        loss_fn_1 = tf.keras.losses.CategoricalCrossentropy()
+        loss_fn_2 = tf.keras.losses.CategoricalCrossentropy()
 
-    loss_fn = loss
+
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
     train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+    train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
     valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)

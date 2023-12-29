@@ -3,7 +3,7 @@ from absl.flags import FLAGS
 import os
 import tensorflow as tf
 import datetime
-from models.model_utils import build_rcnn
+import models.model_utils as mu
 import load_data as ld
 import numpy as np
 
@@ -20,6 +20,9 @@ def main(_argv):
     epochs = FLAGS.epochs
     num_frames_per_clip = FLAGS.num_frames_per_clip
     batch_size = FLAGS.batch_size
+    backbone_network = FLAGS.backbone
+    AUTOTUNE = tf.data.AUTOTUNE
+    learning_rate = FLAGS.learning_rate
 
     dicta_train = ld.load_dataset_from_directory(path_dataset, path_train_annotations)
     dicta_val = ld.load_dataset_from_directory(path_dataset, path_val_annotations)
@@ -38,6 +41,31 @@ def main(_argv):
             ld.FrameGenerator(dicta_val, num_frames_per_clip, training=True, num_of_no_events=1.0),
             output_signature=output_signature)
 
+        #train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+        #val_ds = val_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+
+        train_ds = train_ds.batch(batch_size)
+        val_ds = val_ds.batch(batch_size)
+
+        train_frames, train_labels = next(iter(train_ds))
+        print(f'Shape of training set of frames: {train_frames.shape}')
+        print(f'Shape of training labels: {train_labels.shape}')
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+
+        model = mu.build_simple_rcnn(len(unique_classes), backbone_network, optimizer=optimizer)
+
+    if name_model == '3d_cnn':
+
+        output_signature = (tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.float32),
+                            tf.TensorSpec(shape=(), dtype=tf.int16))
+
+        train_ds = tf.data.Dataset.from_generator(
+            ld.FrameGenerator(dicta_train, num_frames_per_clip, training=True, num_of_no_events=1.0,
+                              output_size=(256, 256)), output_signature=output_signature)
+        val_ds = tf.data.Dataset.from_generator(
+            ld.FrameGenerator(dicta_val, num_frames_per_clip, training=True, num_of_no_events=1.0,
+                              output_size=(256, 256)), output_signature=output_signature)
+
         train_ds = train_ds.batch(batch_size)
         val_ds = val_ds.batch(batch_size)
 
@@ -45,14 +73,20 @@ def main(_argv):
         print(f'Shape of training set of frames: {train_frames.shape}')
         print(f'Shape of training labels: {train_labels.shape}')
 
-        model = build_rcnn(len(unique_classes))
+        model = mu.conv_3d(len(unique_classes), (num_frames_per_clip, 256, 256, 3))
 
         start_time = datetime.datetime.now()
         model.fit(train_ds,
                   epochs=epochs,
                   validation_data=val_ds,
                   callbacks=tf.keras.callbacks.EarlyStopping(patience=20, monitor='val_loss'))
-        print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+    start_time = datetime.datetime.now()
+    model.fit(train_ds,
+              epochs=epochs,
+              validation_data=val_ds,
+              callbacks=tf.keras.callbacks.EarlyStopping(patience=20, monitor='val_loss'))
+    print('Total Training TIME:', (datetime.datetime.now() - start_time))
 
 
 if __name__ == '__main__':
