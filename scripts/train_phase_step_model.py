@@ -352,7 +352,7 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                             input_size=input_sizes_models[backbone_network], batch_size=1,
+                                             input_size=input_sizes_models[backbone_network], batch_size=2,
                                              image_paths=True)
 
     unique_classes = len(selected_classes)
