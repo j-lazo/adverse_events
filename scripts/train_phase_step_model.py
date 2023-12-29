@@ -11,10 +11,9 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 
-
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
-                          'densenet121': (224, 224), 'xception': (299, 299),
+                          'densenet121': (224, 224),
                           'resnet152': (224, 224), 'densenet201': (224, 224)}
 
 
@@ -353,7 +352,7 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                             input_size=input_sizes_models[backbone_network], batch_size=1,
+                                             input_size=input_sizes_models[backbone_network], batch_size=2,
                                              image_paths=True)
 
     unique_classes = len(selected_classes)
