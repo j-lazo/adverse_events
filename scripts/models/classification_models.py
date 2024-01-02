@@ -1,6 +1,7 @@
 from tensorflow import keras
 import tensorflow as tf
 from tensorflow.keras import applications
+import os
 
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                       'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
