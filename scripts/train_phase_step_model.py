@@ -309,7 +309,7 @@ def main(_argv):
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
-    a = FLAGS.train_backbone
+    train_backbone = FLAGS.train_backbone
 
     if data_center == 'both':
         train_dataset_dict = {}
