@@ -289,6 +289,7 @@ def main(_argv):
     institution_folders_frames = {'stras': 'stras_by70', 'bern': 'bern_by70'}
     institution_folders_annotations = {'stras': 'stras_70', 'bern': 'bern_70'}
     physical_devices = tf.config.list_physical_devices('GPU')
+    print('Build with Cuda:', tf.test.is_built_with_cuda())
     print("Num GPUs:", len(physical_devices))
 
     path_dataset = FLAGS.path_dataset
@@ -308,7 +309,7 @@ def main(_argv):
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
-    train_backbone = FLAGS.train_backbone
+    a = FLAGS.train_backbone
 
     if data_center == 'both':
         train_dataset_dict = {}
