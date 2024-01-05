@@ -22,11 +22,11 @@ def correct_labels(list_labels):
     return out_list
 
 
-def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
+def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     test_dataset=None, output_type='', selected_classes='', train_backbone=False):
+                     test_dataset=None, output_type='', selected_classes='', train_backbone=False, verbose=False):
     @tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
@@ -110,6 +110,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                               'batch size': int(batch_size),
                               'learning rate': float(learning_rate),
                               'output type': output_type,
+                              'fold': fold,
                               'selected classes': selected_classes,
                               }
 
@@ -166,6 +167,16 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         valid_accuracy_2.reset_states()
         step = 0
 
+        # headers pd Dataframe
+        header_column = list()
+        header_column.insert(0, 'epoch')
+        header_column.append('train loss')
+        header_column.append('val loss')
+        header_column.append('acc phase training')
+        header_column.append('acc step training')
+        header_column.append('acc phase val')
+        header_column.append('acc phase step')
+
         template = 'ETA: {} - epoch: {} loss: {:.5f}  acc phase: {:.5f}, acc step: {:.5f}'
         for x, train_labels in train_dataset:
             step += 1
@@ -175,9 +186,16 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
                 tf.summary.scalar('accuracy phase', train_accuracy_1.result(), step=epoch)
                 tf.summary.scalar('accuracy step', train_accuracy_2.result(), step=epoch)
+            if verbose:
+                print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
+                                      float(train_accuracy_1.result()), float(train_accuracy_2.result())))
 
-            print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
-                                  float(train_accuracy_1.result()), float(train_accuracy_2.result())))
+        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy phase: {:.5f}, "
+              "train accuracy step: {:.5f}".format(epoch + 1,
+                                                  max_epochs,
+                                                  train_loss.result(),
+                                                  train_accuracy_1.result(),
+                                                  train_accuracy_2.result()))
 
         for x, valid_labels in valid_dataset:
             valid_images = x
@@ -187,14 +205,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 tf.summary.scalar('accuracy phase', valid_accuracy_1.result(), step=epoch)
                 tf.summary.scalar('accuracy step', valid_accuracy_2.result(), step=epoch)
 
-        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy: {:.5f}, "
-              "valid loss: {:.5f}, valid accuracy: {:.5f}".format(epoch + 1,
-                                                                  max_epochs,
-                                                                  train_loss.result(),
-                                                                  train_accuracy_1.result(),
-                                                                  valid_loss.result(),
-                                                                  valid_accuracy_1.result(),
-                                                                  valid_accuracy_2.result()))
+        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy phase: {:.5f}, "
+              "val accuracy step: {:.5f}".format(epoch + 1,
+                                                  max_epochs,
+                                                  valid_loss.result(),
+                                                  train_accuracy_1.result(),
+                                                  valid_accuracy_2.result()))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -210,19 +226,20 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             print('Early stopping triggered: wait time > patience')
             break
 
+        if epoch%5 == 0:
+            df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+                                       train_accuracy_list_1, train_accuracy_list_2,
+                                       val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+
+            path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
+            df.to_csv(path_history_csv_file, index=False)
+
+
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
     print('Total Training TIME:', (datetime.datetime.now() - start_time))
 
     # save history
-    header_column = list()
-    header_column.insert(0, 'epoch')
-    header_column.append('train loss')
-    header_column.append('val loss')
-    header_column.append('acc phase training')
-    header_column.append('acc step training')
-    header_column.append('acc phase val')
-    header_column.append('acc phase step')
 
     df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
                                train_accuracy_list_1, train_accuracy_list_2,
@@ -385,7 +402,7 @@ def main(_argv):
 
     if type_training == 'custom_training':
 
-        custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
+        custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, fold=fold, patience=15,
                         batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
                         output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone)
