@@ -322,6 +322,7 @@ def main(_argv):
     results_dir = FLAGS.results_dir
     learning_rate = FLAGS.learning_rate
     backbone_network = FLAGS.backbone
+    train_verbose = FLAGS.verbose
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
@@ -405,7 +406,8 @@ def main(_argv):
         custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, fold=fold, patience=15,
                         batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
-                        output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone)
+                        output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone,
+                        verbose=train_verbose)
     else:
         print(f'{type_training} not in options!')
 
@@ -429,6 +431,7 @@ if __name__ == '__main__':
     flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
     flags.DEFINE_string('pretrained_weights', '','pretrained weights for the backbone either [''(none), "imagenet", "path_to_weights"]')
     flags.DEFINE_boolean('train_backbone', False, 'train the backbone')
+    flags.DEFINE_boolean('train verbose', False, 'show training evolution per batch')
     try:
         app.run(main)
     except SystemExit:
