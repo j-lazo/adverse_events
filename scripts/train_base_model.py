@@ -11,17 +11,22 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 
-
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
-                          'densenet121': (224, 224), 'xception': (299, 299),
+                          'densenet121': (224, 224),
                           'resnet152': (224, 224), 'densenet201': (224, 224)}
+
+
+def correct_labels(list_labels):
+    out_list = [s.replace('-', ' ') for s in list_labels]
+    return out_list
+
 
 def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     path_test_data='', output_type='', selected_classes=''):
+                     test_dataset=None, output_type='', selected_classes='', train_backbone=False, verbose=False):
     @tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
@@ -36,24 +41,25 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         train_loss_val = train_loss(t_loss)
         predictions_acc_1 = tf.argmax(predictions_1, axis=1)
         predictions_acc_2 = tf.argmax(predictions_2, axis=1)
-        train_accuracy_val_1 = train_accuracy(labels_1, predictions_acc_1)
-        train_accuracy_val_2 = train_accuracy(labels_2, predictions_acc_2)
-        print(train_accuracy_val_1)
-        print(train_accuracy_val_2)
-        train_accuracy_val = (train_accuracy_val_1 + train_accuracy_val_2)/2
-        #tf.reduce_mean(train_accuracy_val_1) +  tf.reduce_mean(train_accuracy_val_2)
+        train_accuracy_val_1 = train_accuracy_1(labels_1, predictions_acc_1)
+        train_accuracy_val_2 = train_accuracy_2(labels_2, predictions_acc_2)
 
         return train_loss_val, train_accuracy_val_1, train_accuracy_val_2
-        #return train_loss_val, train_accuracy_val,
 
     @tf.function
     def valid_step(images, labels):
-        predictions = model(images, training=False)
-        v_loss = loss_fn(labels, predictions)
+        labels_1, labels_2 = labels
+        predictions_1, predictions_2 = model(images, training=False)
+        v_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
+        v_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
+        v_loss = tf.reduce_mean(v_loss_1) + tf.reduce_mean(v_loss_2)
         val_loss = valid_loss(v_loss)
-        val_acc = valid_accuracy(labels, predictions)
+        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
+        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
+        val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_acc_1)
+        val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_acc_2)
 
-        return val_loss, val_acc
+        return val_loss, val_accuracy_val_1, val_accuracy_val_2
 
     @tf.function
     def prediction_step(images):
@@ -69,7 +75,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     elif model_name == 'two_outputs_classifier':
         num_phases = 12
         num_steps = 45
-        model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network)
+        model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network, train_backbone=train_backbone)
         model.summary()
         model.compile(optimizer=optimizer,
                            loss={'y_pahse': 'categorical_crossentropy',
@@ -81,13 +87,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         loss_fn_1 = tf.keras.losses.CategoricalCrossentropy()
         loss_fn_2 = tf.keras.losses.CategoricalCrossentropy()
 
-
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
-    train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+    train_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_1')
     train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-    valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy')
+    valid_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_1')
+    valid_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_2')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
 
     # ID name for the folder and results
@@ -131,7 +137,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     start_time = datetime.datetime.now()
     epoch_counter = list()
     train_loss_list = list()
-    train_accuracy_list = list()
+    val_loss_list = list()
+    train_accuracy_list_1 = list()
+    train_accuracy_list_2 = list()
+    val_accuracy_list_1 = list()
+    val_accuracy_list_2 = list()
 
     model_dir = os.path.join(results_directory, 'model_weights')
     os.mkdir(model_dir)
@@ -140,41 +150,66 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     for epoch in range(max_epochs):
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
-        train_accuracy_list.append(train_accuracy.result().numpy())
+        train_accuracy_list_1.append(train_accuracy_1.result().numpy())
+        val_accuracy_list_2.append(train_accuracy_2.result().numpy())
+
+        val_loss_list.append(valid_loss.result().numpy())
+        val_accuracy_list_1.append(valid_accuracy_1.result().numpy())
+        val_accuracy_list_2.append(valid_accuracy_2.result().numpy())
 
         t = time.time()
         train_loss.reset_states()
-        train_accuracy.reset_states()
+        train_accuracy_1.reset_states()
+        train_accuracy_2.reset_states()
         valid_loss.reset_states()
-        valid_accuracy.reset_states()
+        valid_accuracy_1.reset_states()
+        valid_accuracy_2.reset_states()
         step = 0
 
-        template = 'ETA: {} - epoch: {} loss: {:.5f}  acc: {:.5f}'
+        # headers pd Dataframe
+        header_column = list()
+        header_column.insert(0, 'epoch')
+        header_column.append('train loss')
+        header_column.append('val loss')
+        header_column.append('acc phase training')
+        header_column.append('acc step training')
+        header_column.append('acc phase val')
+        header_column.append('acc phase step')
+
+        template = 'ETA: {} - epoch: {} loss: {:.5f}  acc phase: {:.5f}, acc step: {:.5f}'
         for x, train_labels in train_dataset:
             step += 1
             images = x
-            train_loss_value, t_acc = train_step(images, train_labels)
+            train_loss_value, t_acc_p, tacc_s = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy', train_accuracy.result(), step=epoch)
+                tf.summary.scalar('accuracy phase', train_accuracy_1.result(), step=epoch)
+                tf.summary.scalar('accuracy step', train_accuracy_2.result(), step=epoch)
+            if verbose:
+                print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
+                                      float(train_accuracy_1.result()), float(train_accuracy_2.result())))
 
-            print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
-                                  float(train_accuracy.result())))
+        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy phase: {:.5f}, "
+              "train accuracy step: {:.5f}".format(epoch + 1,
+                                                  max_epochs,
+                                                  train_loss.result(),
+                                                  train_accuracy_1.result(),
+                                                  train_accuracy_2.result()))
 
         for x, valid_labels in valid_dataset:
             valid_images = x
             valid_step(valid_images, valid_labels)
             with val_summary_writer.as_default():
                 tf.summary.scalar('loss', valid_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy', valid_accuracy.result(), step=epoch)
+                tf.summary.scalar('accuracy phase', valid_accuracy_1.result(), step=epoch)
+                tf.summary.scalar('accuracy step', valid_accuracy_2.result(), step=epoch)
 
-        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy: {:.5f}, "
-              "valid loss: {:.5f}, valid accuracy: {:.5f}".format(epoch + 1,
-                                                                  max_epochs,
-                                                                  train_loss.result(),
-                                                                  train_accuracy.result(),
-                                                                  valid_loss.result(),
-                                                                  valid_accuracy.result()))
+        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy phase: {:.5f}, "
+              "val accuracy step: {:.5f}".format(epoch + 1,
+                                                  max_epochs,
+                                                  valid_loss.result(),
+                                                  train_accuracy_1.result(),
+                                                  valid_accuracy_2.result()))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -184,67 +219,93 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             best_loss = valid_loss.result()
         if valid_loss.result() < best_loss:
             best_loss = valid_loss.result()
-            # model.save_weights('model.h5')
+            model.save_weights('best_model_weights.h5')
             wait = 0
         if wait >= patience:
             print('Early stopping triggered: wait time > patience')
             break
 
+        if epoch%5 == 0:
+            df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+                                       train_accuracy_list_1, train_accuracy_list_2,
+                                       val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+
+            path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
+            df.to_csv(path_history_csv_file, index=False)
+
+
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
     print('Total Training TIME:', (datetime.datetime.now() - start_time))
 
-    if path_test_data:
+    # save history
 
-        print(f'Making predictions on test dataset: {path_test_data}')
+    df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+                               train_accuracy_list_1, train_accuracy_list_2,
+                               val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+
+    path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
+    df.to_csv(path_history_csv_file, index=False)
+
+    print(f'csv file with training history saved at: {path_history_csv_file}')
+
+    if test_dataset:
+
+        print(f'Making predictions on test dataset')
         # 2Do load saved model
 
-        test_dataset_dict = dam.load_dataset_from_directory(path_test_data)
-        #test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=ls
-        #training_mode=False, input_size=input_sizes_models[backbone_network], batch_size=1)
-
-        list_images = [test_dataset_dict[x]['Frame_id'] for x in test_dataset_dict.keys()]
-        list_labels = [test_dataset_dict[x]['class'] for x in test_dataset_dict.keys()]
-        unique_class = list(np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()]))
-        test_labels = [unique_class.index(x) for x in list_labels]
-
-        list_predictions = list()
-        i = 0
+        list_predictions_phases = list()
+        list_predictions_steps = list()
+        list_images = list()
+        list_labels_phase = list()
+        list_labels_step = list()
         for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
-            x = data_batch[0]
-            img = x[0]
-            image = tf.expand_dims(img, axis=0)
-            pred = prediction_step(image)
-            prediction = list(pred.numpy()[0])
-            prediction_label = unique_class[prediction.index(np.max(prediction))]
-            list_predictions.append(prediction_label)
-            i += 1
+            image_labels = data_batch[0]
+            path_img = data_batch[1]
+            image, labels = image_labels
+
+            pred_phase, pred_step = prediction_step(image)
+            prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
+            prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
+
+            list_images.append(path_img)
+            list_predictions_phases.append(prediction_phase)
+            list_predictions_steps.append(prediction_steps)
+
+            label_phase, label_step = labels
+            gt_phase = list(label_phase.numpy()[0]).index(max(list(label_phase.numpy()[0])))
+            gt_step = list(label_step.numpy()[0]).index(max(list(label_step.numpy()[0])))
+            list_labels_phase.append(gt_phase)
+            list_labels_step.append(gt_step)
 
         header_column = list()
         header_column.insert(0, 'img name')
-        header_column.append('real label')
-        header_column.append('predicted label')
+        header_column.append('label phase')
+        header_column.append('predicted phase')
+        header_column.append('label step')
+        header_column.append('predicted step')
 
-        df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+        df = pd.DataFrame(list(zip(list_images, list_labels_phase, list_predictions_phases,
+                                   list_labels_step, list_predictions_steps)), columns=header_column)
 
         path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
         df.to_csv(path_results_csv_file, index=False)
 
         print(f'csv file with results saved: {path_results_csv_file}')
 
-        dir_conf_matrix = os.path.join(results_directory, 'confusion_matrix.png')
-        daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
-                                 dir_save_fig=dir_conf_matrix)
+        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_phase.png')
+        daa.compute_confusion_matrix(list_labels_phase, list_predictions_phases, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_phase)
+        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_step.png')
+        daa.compute_confusion_matrix(list_labels_step, list_predictions_steps, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_step)
 
-
-def correct_labels(list_labels):
-    out_list = [s.replace('-', ' ') for s in list_labels]
-    return out_list
 
 def main(_argv):
     institution_folders_frames = {'stras': 'stras_by70', 'bern': 'bern_by70'}
     institution_folders_annotations = {'stras': 'stras_70', 'bern': 'bern_70'}
     physical_devices = tf.config.list_physical_devices('GPU')
+    print('Build with Cuda:', tf.test.is_built_with_cuda())
     print("Num GPUs:", len(physical_devices))
 
     path_dataset = FLAGS.path_dataset
@@ -264,6 +325,7 @@ def main(_argv):
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
+    train_backbone = FLAGS.train_backbone
 
     if data_center == 'both':
         train_dataset_dict = {}
@@ -332,7 +394,8 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                             input_size=input_sizes_models[backbone_network], batch_size=batch_size)
+                                             input_size=input_sizes_models[backbone_network], batch_size=2,
+                                             image_paths=True)
 
     unique_classes = len(selected_classes)
 
@@ -340,8 +403,8 @@ def main(_argv):
 
         custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
                         batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
-                        optimizer=optimizer, path_test_data=path_dataset, results_dir=results_dir,
-                        output_type=output_type, selected_classes=selected_classes)
+                        optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
+                        output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone)
     else:
         print(f'{type_training} not in options!')
 
@@ -364,6 +427,7 @@ if __name__ == '__main__':
     flags.DEFINE_boolean('analyze_data', True, 'analyze the data after the experiment')
     flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
     flags.DEFINE_string('pretrained_weights', '','pretrained weights for the backbone either [''(none), "imagenet", "path_to_weights"]')
+    flags.DEFINE_boolean('train_backbone', False, 'train the backbone')
     try:
         app.run(main)
     except SystemExit:
