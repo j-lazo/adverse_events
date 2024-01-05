@@ -322,7 +322,7 @@ def main(_argv):
     results_dir = FLAGS.results_dir
     learning_rate = FLAGS.learning_rate
     backbone_network = FLAGS.backbone
-    train_verbose = FLAGS.verbose
+    train_verbose = FLAGS.train_verbose
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
@@ -431,7 +431,7 @@ if __name__ == '__main__':
     flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
     flags.DEFINE_string('pretrained_weights', '','pretrained weights for the backbone either [''(none), "imagenet", "path_to_weights"]')
     flags.DEFINE_boolean('train_backbone', False, 'train the backbone')
-    flags.DEFINE_boolean('train verbose', False, 'show training evolution per batch')
+    flags.DEFINE_boolean('train_verbose', False, 'show training evolution per batch')
     try:
         app.run(main)
     except SystemExit:
