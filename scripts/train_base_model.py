@@ -22,49 +22,11 @@ def correct_labels(list_labels):
     return out_list
 
 
-def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, patience=15, batch_size=2,
+def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     test_dataset=None, output_type='', selected_classes='', train_backbone=False, verbose=False):
-    @tf.function
-    def train_step(images, labels):
-        with tf.GradientTape() as tape:
-            labels_1, labels_2 = labels
-            predictions_1, predictions_2 = model(images, training=True)
-            t_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
-            t_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
-            t_loss = tf.reduce_mean(t_loss_1) + tf.reduce_mean(t_loss_2)
-        gradients = tape.gradient(t_loss, model.trainable_variables)
-        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
-
-        train_loss_val = train_loss(t_loss)
-        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
-        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
-        train_accuracy_val_1 = train_accuracy_1(labels_1, predictions_acc_1)
-        train_accuracy_val_2 = train_accuracy_2(labels_2, predictions_acc_2)
-
-        return train_loss_val, train_accuracy_val_1, train_accuracy_val_2
-
-    @tf.function
-    def valid_step(images, labels):
-        labels_1, labels_2 = labels
-        predictions_1, predictions_2 = model(images, training=False)
-        v_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
-        v_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
-        v_loss = tf.reduce_mean(v_loss_1) + tf.reduce_mean(v_loss_2)
-        val_loss = valid_loss(v_loss)
-        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
-        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
-        val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_acc_1)
-        val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_acc_2)
-
-        return val_loss, val_accuracy_val_1, val_accuracy_val_2
-
-    @tf.function
-    def prediction_step(images):
-        predictions = model(images, training=False)
-        return predictions
+                     test_dataset=None, output_type='', train_backbone=False, verbose=False):
 
     if model_name == 'simple_classifier':
         model = simple_classifier(len(num_out_layer), backbone=backbone_network)
@@ -77,23 +39,73 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         num_steps = 45
         model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network, train_backbone=train_backbone)
         model.summary()
-        model.compile(optimizer=optimizer,
-                           loss={'y_pahse': 'categorical_crossentropy',
-                                 'y_step': 'categorical_crossentropy'
-                                 },
-                           metrics={'y_pahse': 'accuracy',
-                                    'y_step': 'accuracy'
-                                    })
-        loss_fn_1 = tf.keras.losses.CategoricalCrossentropy()
-        loss_fn_2 = tf.keras.losses.CategoricalCrossentropy()
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        loss_fn = tf.keras.losses.CategoricalCrossentropy()
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+
+    # ID name for the folder and results
+    backbone_model = backbone_network
+    new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
+                                                batch_size=batch_size, backbone_model=backbone_model)
+
+    trained_mode = model.fit(x=trainX,
+              y={"category_output": trainCategoryY, "color_output": trainColorY},
+              validation_data=(testX, {"category_output": testCategoryY, "color_output": testColorY}),
+              epochs=max_epochs,
+              verbose=1)
+
+    print("[INFO] serializing network...")
+    model.save(args["model"], save_format="h5")
+
+
+
+def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
+                     learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
+                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
+                     optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+                     test_dataset=None, output_type='', train_backbone=False, verbose=False):
+    @tf.function
+    def train_step(images, labels):
+        with tf.GradientTape() as tape:
+            predictions = model(images, training=True)
+            t_loss = loss_fn(y_true=labels, y_pred=predictions)
+        gradients = tape.gradient(t_loss, model.trainable_variables)
+        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
+
+        train_loss_val = train_loss(t_loss)
+        predictions_acc = tf.argmax(predictions, axis=1)
+        train_accuracy_val = train_accuracy(labels, predictions_acc)
+
+        return train_loss_val, train_accuracy_val
+
+    @tf.function
+    def valid_step(images, labels):
+        predictions, = model(images, training=False)
+        v_loss = loss_fn(y_true=labels, y_pred=predictions)
+        v_loss = tf.reduce_mean(v_loss)
+        val_loss = valid_loss(v_loss)
+        predictions_acc = tf.argmax(predictions, axis=1)
+        val_accuracy_val = valid_accuracy(labels, predictions_acc)
+
+        return val_loss, val_accuracy_val
+
+    @tf.function
+    def prediction_step(images):
+        predictions = model(images, training=False)
+        return predictions
+
+    if model_name == 'simple_classifier':
+        model = simple_classifier(num_out_layer, backbone=backbone_network)
+        model.summary()
+        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
+        loss_fn = loss
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
-    train_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_1')
-    train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
+    train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-    valid_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_1')
-    valid_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_2')
+    valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
 
     # ID name for the folder and results
@@ -110,7 +122,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                               'batch size': int(batch_size),
                               'learning rate': float(learning_rate),
                               'output type': output_type,
-                              'selected classes': selected_classes,
+                              'fold': fold,
                               }
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
@@ -138,78 +150,71 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     epoch_counter = list()
     train_loss_list = list()
     val_loss_list = list()
-    train_accuracy_list_1 = list()
-    train_accuracy_list_2 = list()
-    val_accuracy_list_1 = list()
-    val_accuracy_list_2 = list()
+    train_accuracy_list = list()
+    val_accuracy_list = list()
 
     model_dir = os.path.join(results_directory, 'model_weights')
     os.mkdir(model_dir)
     model_dir = ''.join([model_dir, '/saved_weights'])
 
+    # headers pd Dataframe
+    header_column = list()
+    header_column.insert(0, 'epoch')
+    header_column.append('train loss')
+    header_column.append('val loss')
+    header_column.append('acc phase training')
+    header_column.append('acc step training')
+    header_column.append('acc phase val')
+    header_column.append('acc phase step')
+
     for epoch in range(max_epochs):
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
-        train_accuracy_list_1.append(train_accuracy_1.result().numpy())
-        val_accuracy_list_2.append(train_accuracy_2.result().numpy())
+        train_accuracy_list.append(train_accuracy.result().numpy())
 
         val_loss_list.append(valid_loss.result().numpy())
-        val_accuracy_list_1.append(valid_accuracy_1.result().numpy())
-        val_accuracy_list_2.append(valid_accuracy_2.result().numpy())
+        val_accuracy_list.append(valid_accuracy.result().numpy())
 
         t = time.time()
         train_loss.reset_states()
-        train_accuracy_1.reset_states()
-        train_accuracy_2.reset_states()
+        train_accuracy.reset_states()
         valid_loss.reset_states()
-        valid_accuracy_1.reset_states()
-        valid_accuracy_2.reset_states()
+        valid_accuracy.reset_states()
         step = 0
 
-        # headers pd Dataframe
-        header_column = list()
-        header_column.insert(0, 'epoch')
-        header_column.append('train loss')
-        header_column.append('val loss')
-        header_column.append('acc phase training')
-        header_column.append('acc step training')
-        header_column.append('acc phase val')
-        header_column.append('acc phase step')
-
-        template = 'ETA: {} - epoch: {} loss: {:.5f}  acc phase: {:.5f}, acc step: {:.5f}'
+        template = 'ETA: {} - epoch: {} loss: {:.5f}  acc: {:.5f}'
         for x, train_labels in train_dataset:
             step += 1
             images = x
-            train_loss_value, t_acc_p, tacc_s = train_step(images, train_labels)
+            print(np.shape(train_labels.numpy()))
+            print(train_labels.numpy())
+            train_loss_value, t_acc = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy phase', train_accuracy_1.result(), step=epoch)
-                tf.summary.scalar('accuracy step', train_accuracy_2.result(), step=epoch)
+                tf.summary.scalar('accuracy phase', train_accuracy.result(), step=epoch)
             if verbose:
                 print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
-                                      float(train_accuracy_1.result()), float(train_accuracy_2.result())))
+                                      float(train_accuracy.result())))
 
-        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy phase: {:.5f}, "
-              "train accuracy step: {:.5f}".format(epoch + 1,
+        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy : {:.5f}, ".format(epoch + 1,
                                                   max_epochs,
                                                   train_loss.result(),
-                                                  train_accuracy_1.result(),
-                                                  train_accuracy_2.result()))
+                                                  train_accuracy.result(),
+                                                  ))
 
         for x, valid_labels in valid_dataset:
             valid_images = x
             valid_step(valid_images, valid_labels)
             with val_summary_writer.as_default():
                 tf.summary.scalar('loss', valid_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy phase', valid_accuracy_1.result(), step=epoch)
-                tf.summary.scalar('accuracy step', valid_accuracy_2.result(), step=epoch)
+                tf.summary.scalar('accuracy', valid_accuracy.result(), step=epoch)
 
         print("Epoch: {}/{}, val loss: {:.5f}, val accuracy phase: {:.5f}, "
               "val accuracy step: {:.5f}".format(epoch + 1,
                                                   max_epochs,
                                                   valid_loss.result(),
-                                                  train_accuracy_1.result(),
-                                                  valid_accuracy_2.result()))
+                                                  train_accuracy.result(),
+                                                  ))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -225,14 +230,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             print('Early stopping triggered: wait time > patience')
             break
 
-        if epoch%5 == 0:
+        if epoch % 5 == 0:
             df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
-                                       train_accuracy_list_1, train_accuracy_list_2,
-                                       val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+                                       train_accuracy_list,
+                                       val_accuracy_list)), columns=header_column)
 
             path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
             df.to_csv(path_history_csv_file, index=False)
-
 
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
@@ -240,9 +244,15 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     # save history
 
+    print(len(epoch_counter), epoch_counter)
+    print(len(train_loss_list), train_loss_list)
+    print(len(val_loss_list), val_loss_list)
+    print(len(train_accuracy_list), train_accuracy_list)
+    print(len(val_accuracy_list), val_accuracy_list)
+
     df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
-                               train_accuracy_list_1, train_accuracy_list_2,
-                               val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+                               train_accuracy_list,
+                               val_accuracy_list)), columns=header_column)
 
     path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
     df.to_csv(path_history_csv_file, index=False)
@@ -268,7 +278,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
             prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
 
-            list_images.append(path_img)
+            list_images.append(path_img.numpy())
             list_predictions_phases.append(prediction_phase)
             list_predictions_steps.append(prediction_steps)
 
@@ -313,7 +323,6 @@ def main(_argv):
     data_center = FLAGS.data_center
     fold = FLAGS.fold
     output_type = FLAGS.output_type
-    selected_classes = correct_labels(FLAGS.selected_classes)
     type_training = FLAGS.type_training
     name_model = FLAGS.name_model
     batch_size = FLAGS.batch_size
@@ -321,6 +330,9 @@ def main(_argv):
     results_dir = FLAGS.results_dir
     learning_rate = FLAGS.learning_rate
     backbone_network = FLAGS.backbone
+    train_verbose = FLAGS.train_verbose
+    selected_classes = ['Overall']
+
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
@@ -347,9 +359,9 @@ def main(_argv):
             val_annotations_file_path = os.path.join(path_val_annotations, val_annotations_file_name)
             test_annotations_file_path = os.path.join(path_test_annotations, test_annotations_file_name)
 
-            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type)
-            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type)
-            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path, output_type=output_type)
+            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=1)
+            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=1)
+            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path, output_type=output_type, ratio=1)
 
             train_dataset_dict = {**train_dataset_dict, **temp_train_dataset_dict}
             valid_dataset_dict = {**valid_dataset_dict, **temp_valid_dataset_dict}
@@ -382,29 +394,28 @@ def main(_argv):
         test_annotations_file_path_1 = os.path.join(path_test_annotations_1, test_annotations_file_name_1)
         test_annotations_file_path_2 = os.path.join(path_test_annotations_2, test_annotations_file_name_2)
 
-        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type)
-        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type)
-
-        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type)
-        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
+        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=1)
+        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=1)
+        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type, ratio=1)
+        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type, ratio=1)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
-    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes, training_mode=True,
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, selected_labels=selected_classes,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
-    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
-    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                             input_size=input_sizes_models[backbone_network], batch_size=2,
+    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
+                                             input_size=input_sizes_models[backbone_network], batch_size=1,
                                              image_paths=True)
 
-    unique_classes = len(selected_classes)
-
+    unique_classes = 2
     if type_training == 'custom_training':
 
-        custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, patience=15,
+        custom_training(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, fold=fold, patience=15,
                         batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
-                        output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone)
+                        output_type=output_type, train_backbone=train_backbone,
+                        verbose=train_verbose)
     else:
         print(f'{type_training} not in options!')
 
@@ -428,6 +439,7 @@ if __name__ == '__main__':
     flags.DEFINE_string('backbone', 'resnet50', 'A list of the nets used as backbones: resnet101, resnet50, densenet121, vgg19')
     flags.DEFINE_string('pretrained_weights', '','pretrained weights for the backbone either [''(none), "imagenet", "path_to_weights"]')
     flags.DEFINE_boolean('train_backbone', False, 'train the backbone')
+    flags.DEFINE_boolean('train_verbose', False, 'show training evolution per batch')
     try:
         app.run(main)
     except SystemExit:
