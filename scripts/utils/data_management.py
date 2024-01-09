@@ -234,6 +234,36 @@ def load_dataset_from_directory(path_frames, path_annotations, output_type='bina
 
         output_dict = copy.copy(new_output_dict)
 
+    if ratio:
+        new_output_dict = {}
+        temp_dict = {}
+        total_neg = 0
+        keys_dict = list(output_dict.keys())
+        total_frames = len(keys_dict)
+
+        for k in keys_dict:
+            if output_dict[k]['Bleeding'] == 1 or output_dict[k]['Mechanical injury'] == 1 or output_dict[k]['Thermal injury'] == 1:
+                total_neg += 1
+
+        total_pos = int(total_neg * ratio)
+        prob = (total_pos/(total_frames-total_neg))
+
+        for k in keys_dict:
+            if output_dict[k]['Bleeding'] == 1 or output_dict[k]['Mechanical injury'] == 1 or output_dict[k]['Thermal injury'] == 1:
+                #temp_dict = output_dict[k]
+                new_output_dict[k] = output_dict[k]
+
+            else:
+                if random.random() <= prob:
+                    #temp_dict = output_dict[k]
+                    new_output_dict[k] = output_dict[k]
+
+            #new_output_dict = {**new_output_dict, **temp_dict}
+            #print(temp_dict)
+            #print(new_output_dict)
+
+        output_dict = copy.copy(new_output_dict)
+
     print(f'Dataset with {len(output_dict)} elements')
     return output_dict
 
