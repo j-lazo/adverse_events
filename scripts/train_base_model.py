@@ -16,7 +16,6 @@ input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': 
                           'densenet121': (224, 224),
                           'resnet152': (224, 224), 'densenet201': (224, 224)}
 
-
 def correct_labels(list_labels):
     out_list = [s.replace('-', ' ') for s in list_labels]
     return out_list
@@ -31,7 +30,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
     if model_name == 'simple_classifier':
         model = simple_classifier(len(num_out_layer), backbone=backbone_network)
         model.summary()
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         loss_fn = loss
 
     elif model_name == 'two_outputs_classifier':
@@ -40,7 +39,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
         model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network, train_backbone=train_backbone)
         model.summary()
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-        loss_fn = tf.keras.losses.CategoricalCrossentropy()
+        loss_fn = loss
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
@@ -62,13 +61,14 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
 
 def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
-                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
+                     loss=tf.keras.losses.CategoricalCrossentropy(), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     test_dataset=None, output_type='', train_backbone=False, verbose=False):
+                     test_dataset=None, output_type='', train_backbone=False, verbose=False, gpus_available=None):
     @tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
             predictions = model(images, training=True)
+
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
@@ -81,7 +81,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     @tf.function
     def valid_step(images, labels):
-        predictions, = model(images, training=False)
+        predictions = model(images, training=False)
         v_loss = loss_fn(y_true=labels, y_pred=predictions)
         v_loss = tf.reduce_mean(v_loss)
         val_loss = valid_loss(v_loss)
@@ -98,8 +98,33 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     if model_name == 'simple_classifier':
         model = simple_classifier(num_out_layer, backbone=backbone_network)
         model.summary()
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
-        loss_fn = loss
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        loss_fn = tf.keras.losses.CategoricalCrossentropy()
+
+    if gpus_available > 1:
+        strategy = tf.distribute.MirroredStrategy()
+    else:
+        strategy = None
+
+    if strategy:
+        with strategy.scope():
+
+            if model_name == 'simple_classifier':
+                model = simple_classifier(num_out_layer, backbone=backbone_network)
+                model.summary()
+                loss_fn = tf.keras.losses.CategoricalCrossentropy()
+
+            print('Multi-GPU training')
+            model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+    else:
+        if model_name == 'simple_classifier':
+            model = simple_classifier(num_out_layer, backbone=backbone_network)
+            model.summary()
+            loss_fn = tf.keras.losses.CategoricalCrossentropy()
+
+        print('Single-GPU training')
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
@@ -162,10 +187,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     header_column.insert(0, 'epoch')
     header_column.append('train loss')
     header_column.append('val loss')
-    header_column.append('acc phase training')
-    header_column.append('acc step training')
-    header_column.append('acc phase val')
-    header_column.append('acc phase step')
+    header_column.append('acc training')
+    header_column.append('acc  val')
 
     for epoch in range(max_epochs):
         epoch_counter.append(epoch)
@@ -186,8 +209,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         for x, train_labels in train_dataset:
             step += 1
             images = x
-            print(np.shape(train_labels.numpy()))
-            print(train_labels.numpy())
             train_loss_value, t_acc = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
@@ -209,12 +230,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 tf.summary.scalar('loss', valid_loss.result(), step=epoch)
                 tf.summary.scalar('accuracy', valid_accuracy.result(), step=epoch)
 
-        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy phase: {:.5f}, "
-              "val accuracy step: {:.5f}".format(epoch + 1,
-                                                  max_epochs,
-                                                  valid_loss.result(),
-                                                  train_accuracy.result(),
-                                                  ))
+        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy: {:.5f}, ".format(epoch + 1,
+                                                                              max_epochs,
+                                                                              valid_loss.result(),
+                                                                              train_accuracy.result(),
+                                                                              ))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -244,12 +264,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     # save history
 
-    print(len(epoch_counter), epoch_counter)
-    print(len(train_loss_list), train_loss_list)
-    print(len(val_loss_list), val_loss_list)
-    print(len(train_accuracy_list), train_accuracy_list)
-    print(len(val_accuracy_list), val_accuracy_list)
-
     df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
                                train_accuracy_list,
                                val_accuracy_list)), columns=header_column)
@@ -264,51 +278,37 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         print(f'Making predictions on test dataset')
         # 2Do load saved model
 
-        list_predictions_phases = list()
-        list_predictions_steps = list()
+        list_predictions = list()
         list_images = list()
-        list_labels_phase = list()
-        list_labels_step = list()
+        list_labels = list()
         for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
             image_labels = data_batch[0]
             path_img = data_batch[1]
             image, labels = image_labels
 
-            pred_phase, pred_step = prediction_step(image)
-            prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
-            prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
-
+            pred = prediction_step(image)
+            prediction = list(pred.numpy()[0]).index(max(list(pred.numpy()[0])))
             list_images.append(path_img.numpy())
-            list_predictions_phases.append(prediction_phase)
-            list_predictions_steps.append(prediction_steps)
+            list_predictions.append(prediction)
 
-            label_phase, label_step = labels
-            gt_phase = list(label_phase.numpy()[0]).index(max(list(label_phase.numpy()[0])))
-            gt_step = list(label_step.numpy()[0]).index(max(list(label_step.numpy()[0])))
-            list_labels_phase.append(gt_phase)
-            list_labels_step.append(gt_step)
+            gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
+            list_labels.append(gt_label)
 
         header_column = list()
         header_column.insert(0, 'img name')
-        header_column.append('label phase')
-        header_column.append('predicted phase')
-        header_column.append('label step')
-        header_column.append('predicted step')
+        header_column.append('label')
+        header_column.append('predicted')
 
-        df = pd.DataFrame(list(zip(list_images, list_labels_phase, list_predictions_phases,
-                                   list_labels_step, list_predictions_steps)), columns=header_column)
+        df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
 
         path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
         df.to_csv(path_results_csv_file, index=False)
 
         print(f'csv file with results saved: {path_results_csv_file}')
 
-        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_phase.png')
-        daa.compute_confusion_matrix(list_labels_phase, list_predictions_phases, plot_figure=False,
+        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix.png')
+        daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
                                  dir_save_fig=dir_conf_matrix_phase)
-        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_step.png')
-        daa.compute_confusion_matrix(list_labels_step, list_predictions_steps, plot_figure=False,
-                                 dir_save_fig=dir_conf_matrix_step)
 
 
 def main(_argv):
@@ -334,7 +334,7 @@ def main(_argv):
     selected_classes = ['Overall']
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-    loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+    loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
     train_backbone = FLAGS.train_backbone
@@ -405,7 +405,7 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
-                                             input_size=input_sizes_models[backbone_network], batch_size=1,
+                                             input_size=input_sizes_models[backbone_network], batch_size=len(physical_devices),
                                              image_paths=True)
 
     unique_classes = 2
@@ -415,7 +415,7 @@ def main(_argv):
                         batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
                         output_type=output_type, train_backbone=train_backbone,
-                        verbose=train_verbose)
+                        verbose=train_verbose, gpus_available=len(physical_devices))
     else:
         print(f'{type_training} not in options!')
 

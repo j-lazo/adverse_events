@@ -511,13 +511,14 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
 
     if len(images_class[0]) > 1:
         label_1 = [tf.one_hot(v[0], 12) for v in images_class]
-        label_2 = [tf.one_hot(v[0], 45) for v in images_class]
+        label_2 = [tf.one_hot(v[1], 45) for v in images_class]
         labels_ds1 = tf.data.Dataset.from_tensor_slices(label_1)
         labels_ds2 = tf.data.Dataset.from_tensor_slices(label_2)
         labels_ds = tf.data.Dataset.zip((labels_ds1, labels_ds2))
     else:
         unique_classes = list(np.unique(images_class))
-        labels = [unique_classes.index(v) for v in images_class]
+        #labels = [unique_classes.index(v) for v in images_class]
+        labels = [tf.one_hot(v[0], 2) for v in images_class]
         labels_ds = tf.data.Dataset.from_tensor_slices(labels)
 
     if image_paths is True:
