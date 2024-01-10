@@ -175,7 +175,7 @@ def simple_classifier(num_classes, backbone='resnet101', input_size=input_sizes_
     input_image = keras.Input(shape=input_size + (3,), name="image_input")
     x = tf.image.resize(input_image, input_sizes_models[backbone], method='area')
     x = get_preprocess_input_backbone(backbone, x)
-    base_model = load_pretrained_backbones(backbone)
+    base_model = load_pretrained_backbones_from_local(backbone)
     if train_backbone is False:
         for layer in base_model.layers:
             layer.trainable = False
