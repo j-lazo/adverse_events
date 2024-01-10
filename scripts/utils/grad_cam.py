@@ -12,7 +12,7 @@ from absl.flags import FLAGS
 from tensorflow import keras
 import time
 from tensorflow.keras import applications
-
+import data_management as dam
 
 def load_model(directory_model):
 
@@ -259,7 +259,8 @@ def get_classifier_cap(model, name_backbone):
 
 
 def analyze_data_gradcam(directory_model, dataset_dir, dataset_to_analyze, output_dir='', plot=False,
-                         save_results=True):
+                         save_results=True, annotations_dict=None):
+
     """
     Given a classification network and a dataset to analyze, it returns the heat-map and the binary mask
     Parameters
@@ -275,30 +276,44 @@ def analyze_data_gradcam(directory_model, dataset_dir, dataset_to_analyze, outpu
     -------
 
     """
+    list_keys = list(annotations_dict.keys())
+    cases = [k[:4] for k in list_keys]
+    patient_cases = np.unique(cases)
+
+    list_img_paths = list()
+    list_bleeding = list()
+    list_mis = list()
+    list_ti = list()
+
+    for k in annotations_dict.keys():
+        list_img_paths.append(annotations_dict[k]['Path_img'])
+        list_bleeding.append(annotations_dict[k]['Bleeding'])
+        list_mis.append(annotations_dict[k]['Mechanical injury'])
+        list_ti.append(annotations_dict[k]['Thermal injury'])
 
     if os.path.isdir(dataset_to_analyze):
         if output_dir == '':
-            gradcam_predictions_predictions_dir = ''.join([dataset_dir, '/gradcam_predictions/'])
+            gradcam_predictions_predictions_dir = os.path.join(dataset_dir, 'gradcam_predictions')
 
             if not os.path.isdir(gradcam_predictions_predictions_dir):
                 os.mkdir(gradcam_predictions_predictions_dir)
 
-            output_dir = ''.join([dataset_dir,
-                                  '/gradcam_predictions/'])
+            for patient_case in patient_cases:
+                os.mkdir(os.path.join(gradcam_predictions_predictions_dir, patient_case))
+                output_dir = os.path.join(dataset_dir, gradcam_predictions_predictions_dir, patient_case)
 
-            heat_maps_dir = output_dir + 'heatmaps/'
-            binary_masks_dir = output_dir + 'predicted_masks/'
-            if not os.path.isdir(output_dir):
-                os.mkdir(output_dir)
+                heat_maps_dir = os.path.join(output_dir, 'heatmaps')
+                binary_masks_dir = os.path.join(output_dir, 'predicted_masks')
+                if not os.path.isdir(output_dir):
+                    os.mkdir(output_dir)
 
-            if not os.path.isdir(heat_maps_dir):
-                os.mkdir(heat_maps_dir)
+                if not os.path.isdir(heat_maps_dir):
+                    os.mkdir(heat_maps_dir)
 
-            if not os.path.isdir(binary_masks_dir):
-                os.mkdir(binary_masks_dir)
+                if not os.path.isdir(binary_masks_dir):
+                    os.mkdir(binary_masks_dir)
 
         model, _ = load_model(directory_model)
-        model.summary()
         #backbone_model = model.get_layer(index=0)
         #classifier_cap = model.get_layer(index=-1)
         backbone_model = model.get_layer(index=4)# here you need to modify it to get only the first 8 layers
@@ -334,58 +349,102 @@ def analyze_data_gradcam(directory_model, dataset_dir, dataset_to_analyze, outpu
 
         #last_conv_layer = model.get_layer(last_conv_layer_name)
         # load the data
-        test_dataset = os.listdir(dataset_to_analyze)
-        test_dataset = [f for f in test_dataset if os.path.isdir(os.path.join(dataset_to_analyze, f))]
-        list_imgs = os.listdir(dataset_to_analyze)
-        list_imgs = [os.path.join(dataset_to_analyze, f) for f in list_imgs]
-        #for folder in test_dataset:
-        #    dir_folder = ''.join([dataset_to_analyze, folder, '/'])
-        #    imgs_subdir = [dir_folder + f for f in os.listdir(dir_folder) if f.endswith('.png') or f.endswith('.jpg')]
-        #    list_imgs = list_imgs + imgs_subdir
+        for patient_case in patient_cases:
 
-        for i, img_path in enumerate(tqdm.tqdm(list_imgs, desc=f'Making mask predictions, {len(list_imgs)} images')):
-            # if you want to pick random paths uncomment bellow and comment the previous one to have a counter
-            #img_path = random.choice(list_imgs)
-            preprocess_input, img_size = load_preprocess_input('resnet50')
-            img_array = preprocess_input(get_img_array(img_path, size=img_size))
-            img_name = os.path.split(img_path)[-1]
-            img = tf.keras.preprocessing.image.load_img(img_path)
-            img = tf.keras.preprocessing.image.img_to_array(img)
-            img = tf.keras.preprocessing.image.smart_resize(img, img_size, interpolation='bilinear')
+            output_dir = os.path.join(dataset_dir, gradcam_predictions_predictions_dir, patient_case)
+            heat_maps_dir = os.path.join(output_dir, 'heatmaps')
+            binary_masks_dir = os.path.join(output_dir, 'predicted_masks')
 
-            test_img = cv2.imread(img_path)
-            test_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB)
-            img_resized = cv2.resize(test_img, img_size, interpolation=cv2.INTER_AREA)
+            path_bleeding_heat_map = heat_maps_dir + '/bleeding/'
+            path_bleeding_heat_mask = binary_masks_dir + '/bleeding/'
+            path_mi_heat_map = heat_maps_dir + '/mi/'
+            path_mi_heat_mask = binary_masks_dir + '/mi/'
+            path_ti_heat_map = heat_maps_dir + '/ti/'
+            path_ti_heat_mask = binary_masks_dir + '/ti/'
+            path_not_heat_map = heat_maps_dir + '/not_iae/'
+            path_not_heat_mask = binary_masks_dir + '/not_iae/'
 
-            heatmap = make_gradcam_heatmap(img_array, last_conv_layer_model, classifier_model)
-            superimposed_img, mask_heatmap, binary_mask = generate_heat_map_and_mask(heatmap, img, img_size)
-            if save_results is True:
-                cv2.imwrite(binary_masks_dir + img_name, binary_mask)
-                superimposed_img.save(heat_maps_dir + img_name)
+            os.mkdir(path_bleeding_heat_map)
+            os.mkdir(path_bleeding_heat_mask)
+            os.mkdir(path_mi_heat_map)
+            os.mkdir(path_mi_heat_mask)
+            os.mkdir(path_ti_heat_map)
+            os.mkdir(path_ti_heat_mask)
+            os.mkdir(path_not_heat_map)
+            os.mkdir(path_not_heat_mask)
 
-            if plot is True:
-                plt.figure()
-                plt.subplot(131)
-                plt.imshow(img_resized)
-                plt.subplot(132)
-                plt.imshow(superimposed_img)
-                plt.subplot(133)
-                plt.imshow(mask_heatmap)
-                plt.show()
+            path_patient_case = os.path.join(dataset_to_analyze, patient_case)
+            test_dataset = os.listdir(path_patient_case)
+            test_dataset = [f for f in test_dataset if os.path.isdir(os.path.join(path_patient_case, f))]
+            list_imgs = os.listdir(path_patient_case)
+            list_imgs = [os.path.join(path_patient_case, f) for f in list_imgs]
+            #for folder in test_dataset:
+            #    dir_folder = ''.join([dataset_to_analyze, folder, '/'])
+            #    imgs_subdir = [dir_folder + f for f in os.listdir(dir_folder) if f.endswith('.png') or f.endswith('.jpg')]
+            #    list_imgs = list_imgs + imgs_subdir
+
+            for i, img_path in enumerate(tqdm.tqdm(list_imgs, desc=f'Making mask predictions, {len(list_imgs)} images, case {patient_case}')):
+                if img_path in list_img_paths:
+                    idx = list_img_paths.index(img_path)
+                    # if you want to pick random paths uncomment bellow and comment the previous one to have a counter
+                    #img_path = random.choice(list_imgs)
+                    preprocess_input, img_size = load_preprocess_input('resnet50')
+                    img_array = preprocess_input(get_img_array(img_path, size=img_size))
+                    img_name = os.path.split(img_path)[-1]
+                    img = tf.keras.preprocessing.image.load_img(img_path)
+                    img = tf.keras.preprocessing.image.img_to_array(img)
+                    img = tf.keras.preprocessing.image.smart_resize(img, img_size, interpolation='bilinear')
+
+                    test_img = cv2.imread(img_path)
+                    test_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB)
+                    img_resized = cv2.resize(test_img, img_size, interpolation=cv2.INTER_AREA)
+
+                    heatmap = make_gradcam_heatmap(img_array, last_conv_layer_model, classifier_model)
+                    superimposed_img, mask_heatmap, binary_mask = generate_heat_map_and_mask(heatmap, img, img_size)
+                    if save_results is True:
+
+                        if list_bleeding[idx] == 1:
+                            cv2.imwrite(path_bleeding_heat_mask + img_name, binary_mask)
+                            superimposed_img.save(path_bleeding_heat_map + img_name)
+
+                        if list_mis[idx] == 1:
+                            cv2.imwrite(path_mi_heat_mask + img_name, binary_mask)
+                            superimposed_img.save(path_mi_heat_map + img_name)
+
+                        if list_ti[idx] == 1:
+                            cv2.imwrite(path_mi_heat_mask + img_name, binary_mask)
+                            superimposed_img.save(path_ti_heat_map + img_name)
+
+                        if list_bleeding[idx] == 0 and list_mis[idx] == 0 and list_ti[idx] == 0:
+                            cv2.imwrite(path_not_heat_mask + img_name, binary_mask)
+                            superimposed_img.save(path_not_heat_map + img_name)
+
+                    if plot is True:
+                        plt.figure()
+                        plt.subplot(131)
+                        plt.imshow(img_resized)
+                        plt.subplot(132)
+                        plt.imshow(superimposed_img)
+                        plt.subplot(133)
+                        plt.imshow(mask_heatmap)
+                        plt.show()
 
 
 def main(_argv):
     model_directory = FLAGS.model_directory
     dataset_dir = FLAGS.dataset_dir
     dataset_to_analyze = FLAGS.dataset_to_analyze
+    path_annotations = FLAGS.path_annotations
+    annotations_dict = dam.load_dataset_from_directory(path_annotations=path_annotations, path_frames=dataset_to_analyze, ratio=1)
     analyze_data_gradcam(model_directory, dataset_dir, dataset_to_analyze, output_dir='', plot=False,
-                         save_results=True)
+                         save_results=True, annotations_dict=annotations_dict)
 
 
 if __name__ == '__main__':
     flags.DEFINE_string('model_directory', '', 'name of the model')
     flags.DEFINE_string('dataset_dir', '', 'name of the model')
     flags.DEFINE_string('dataset_to_analyze', '', 'name of the model')
+    flags.DEFINE_string('path_annotations', '', 'path to the annotations')
     try:
         app.run(main)
     except SystemExit:
