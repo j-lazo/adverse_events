@@ -113,9 +113,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 model = simple_classifier(num_out_layer, backbone=backbone_network)
                 model.summary()
                 loss_fn = tf.keras.losses.CategoricalCrossentropy()
-
+            metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
+                       tf.keras.metrics.Recall(name='recall')]
             print('Multi-GPU training')
-            model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+            model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+                          loss=tf.keras.losses.CategoricalCrossentropy(),
+                          metrics=metrics)
 
     else:
         if model_name == 'simple_classifier':
