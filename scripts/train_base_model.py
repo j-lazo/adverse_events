@@ -68,7 +68,6 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     def train_step(images, labels):
         with tf.GradientTape() as tape:
             predictions = model(images, training=True)
-
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -102,7 +101,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         loss_fn = tf.keras.losses.CategoricalCrossentropy()
 
     if gpus_available > 1:
-        strategy = tf.distribute.MirroredStrategy()
+        #strategy = tf.distribute.MirroredStrategy()
+        strategy = None
     else:
         strategy = None
 
