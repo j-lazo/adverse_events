@@ -94,6 +94,20 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         predictions = model(images, training=False)
         return predictions
 
+    @tf.function
+    def distributed_train_step(dataset_inputs):
+        per_replica_losses = strategy.run(train_step, args=(dataset_inputs,))
+        return strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,
+                               axis=None)
+
+    @tf.function
+    def distributed_valid_step(dataset_inputs):
+        return strategy.run(valid_step, args=(dataset_inputs,))
+
+    @tf.function
+    def distributed_test_step(dataset_inputs):
+        return strategy.run(prediction_step , args=(dataset_inputs,))
+
     if model_name == 'simple_classifier':
         model = simple_classifier(num_out_layer, backbone=backbone_network)
         model.summary()
@@ -211,7 +225,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         for x, train_labels in train_dataset:
             step += 1
             images = x
-            train_loss_value, t_acc = train_step(images, train_labels)
+            if strategy:
+                pass
+            else:
+                train_loss_value, t_acc = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
                 tf.summary.scalar('accuracy phase', train_accuracy.result(), step=epoch)
@@ -290,7 +307,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
             pred = prediction_step(image)
             prediction = list(pred.numpy()[0]).index(max(list(pred.numpy()[0])))
-            list_images.append(path_img.numpy())
+            list_images.append(path_img.numpy()[0].decode("utf-8"))
             list_predictions.append(prediction)
 
             gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
@@ -407,7 +424,7 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
-                                             input_size=input_sizes_models[backbone_network], batch_size=len(physical_devices),
+                                             input_size=input_sizes_models[backbone_network], batch_size=1,
                                              image_paths=True)
 
     unique_classes = 2
