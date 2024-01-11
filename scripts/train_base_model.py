@@ -71,7 +71,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
         gradients = tape.gradient(t_loss, model.trainable_variables)
-        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
         train_loss_val = train_loss(t_loss)
         predictions_acc = tf.argmax(predictions, axis=1)
