@@ -181,8 +181,10 @@ def simple_classifier(num_classes, backbone='resnet101', input_size=input_sizes_
             layer.trainable = False
 
     x = base_model(x)
+    x = keras.layers.Dense(2048, activation='relu')(x)
+    x = keras.layers.Dropout(0.1)(x)
     x = keras.layers.Dense(1024, activation='relu')(x)
-    x = keras.layers.Dropout(0.3)(x)
+    x = keras.layers.Dropout(0.1)(x)
     x = keras.layers.Dense(512, activation='relu')(x)
     x = keras.layers.Flatten()(x)
     output_layer = keras.layers.Dense(num_classes, activation='softmax')(x)
