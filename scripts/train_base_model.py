@@ -75,6 +75,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         train_loss_val = train_loss(t_loss)
         predictions_acc = tf.argmax(predictions, axis=1)
         train_accuracy_val = train_accuracy(labels, predictions_acc)
+        train_f1_score_val = train_f1_score(labels, predictions_acc)
 
         return train_loss_val, train_accuracy_val
 
@@ -86,6 +87,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         val_loss = valid_loss(v_loss)
         predictions_acc = tf.argmax(predictions, axis=1)
         val_accuracy_val = valid_accuracy(labels, predictions_acc)
+        valid_f1_score_val = valid_f1_score(labels, predictions_acc)
 
         return val_loss, val_accuracy_val
 
@@ -127,7 +129,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 model = simple_classifier(num_out_layer, backbone=backbone_network)
                 model.summary()
                 loss_fn = tf.keras.losses.CategoricalCrossentropy()
-            metrics = ["accuracy"]
+            metrics = ["accuracy", tf.keras.metrics.F1Score()]
             print('Multi-GPU training')
             model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
                           loss=tf.keras.losses.CategoricalCrossentropy(),
@@ -144,9 +146,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
-    train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+    train_accuracy = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+    train_f1_score = tf.keras.metrics.F1Score(name='train_f1_score')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-    valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy')
+    valid_accuracy = tf.keras.metrics.CategoricalAccuracy(name='valid_accuracy')
+    valid_f1_score = tf.keras.metrics.F1Score(name='valid_f1_score')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
 
     # ID name for the folder and results
@@ -193,6 +197,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     val_loss_list = list()
     train_accuracy_list = list()
     val_accuracy_list = list()
+    f1_train_list = list()
+    f1_valid_list = list()
 
     model_dir = os.path.join(results_directory, 'model_weights')
     os.mkdir(model_dir)
@@ -205,14 +211,18 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     header_column.append('val loss')
     header_column.append('acc training')
     header_column.append('acc  val')
+    header_column.append('train  f-1')
+    header_column.append('val  f-1')
 
     for epoch in range(max_epochs):
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
         train_accuracy_list.append(train_accuracy.result().numpy())
+        f1_train_list.append(train_f1_score.result().numpy())
 
         val_loss_list.append(valid_loss.result().numpy())
         val_accuracy_list.append(valid_accuracy.result().numpy())
+        f1_valid_list.append(valid_f1_score.result().numpy())
 
         t = time.time()
         train_loss.reset_states()
@@ -231,15 +241,16 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 train_loss_value, t_acc = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy phase', train_accuracy.result(), step=epoch)
+                tf.summary.scalar('train accuracy', train_accuracy.result(), step=epoch)
             if verbose:
                 print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
                                       float(train_accuracy.result())))
 
-        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy : {:.5f}, ".format(epoch + 1,
+        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy : {:.5f}, train f-1 score: {:.5f}".format(epoch + 1,
                                                   max_epochs,
                                                   train_loss.result(),
                                                   train_accuracy.result(),
+                                                  train_f1_score.result()
                                                   ))
 
         for x, valid_labels in valid_dataset:
@@ -249,11 +260,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                 tf.summary.scalar('loss', valid_loss.result(), step=epoch)
                 tf.summary.scalar('accuracy', valid_accuracy.result(), step=epoch)
 
-        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy: {:.5f}, ".format(epoch + 1,
+        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy: {:.5f}, val f-1 score: {:.5f}".format(epoch + 1,
                                                                               max_epochs,
                                                                               valid_loss.result(),
                                                                               train_accuracy.result(),
-                                                                              ))
+                                                                              valid_f1_score.result()))
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -285,7 +296,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
 
     df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
                                train_accuracy_list,
-                               val_accuracy_list)), columns=header_column)
+                               val_accuracy_list, f1_train_list, f1_valid_list)), columns=header_column)
 
     path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
     df.to_csv(path_history_csv_file, index=False)
@@ -355,7 +366,7 @@ def main(_argv):
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
-               tf.keras.metrics.Recall(name='recall')]
+               tf.keras.metrics.Recall(name='recall'), tf.keras.metrics.F1Score()]
     train_backbone = FLAGS.train_backbone
 
     if data_center == 'both':
