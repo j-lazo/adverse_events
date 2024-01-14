@@ -10,6 +10,7 @@ import tensorflow as tf
 import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger, TensorBoard
 
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
@@ -25,10 +26,11 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
                      optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     test_dataset=None, output_type='', train_backbone=False, verbose=False):
+                     test_dataset=None, output_type='', train_backbone=False):
 
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     if model_name == 'simple_classifier':
-        model = simple_classifier(len(num_out_layer), backbone=backbone_network)
+        model = simple_classifier(num_out_layer, backbone=backbone_network)
         model.summary()
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         loss_fn = loss
@@ -41,21 +43,87 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         loss_fn = loss
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
     # ID name for the folder and results
     backbone_model = backbone_network
     new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
                                                 batch_size=batch_size, backbone_model=backbone_model)
 
-    trained_mode = model.fit(x=trainX,
-              y={"category_output": trainCategoryY, "color_output": trainColorY},
-              validation_data=(testX, {"category_output": testCategoryY, "color_output": testColorY}),
-              epochs=max_epochs,
-              verbose=1)
+    # the information needed for the yaml
+    training_date_time = datetime.datetime.now()
+    information_experiment = {'experiment folder': new_results_id,
+                              'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
+                              'name model': model_name,
+                              'backbone': backbone_model,
+                              'batch size': int(batch_size),
+                              'learning rate': float(learning_rate),
+                              'output type': output_type,
+                              'fold': fold,
+                              }
 
-    print("[INFO] serializing network...")
-    model.save(args["model"], save_format="h5")
+    results_directory = ''.join([results_dir, '/', new_results_id, '/'])
+    # if results experiment doesn't exist create it
+    if not os.path.isdir(results_directory):
+        os.mkdir(results_directory)
+    else:
+        count = 0
+        while os.path.isdir(results_directory):
+            results_directory = ''.join([results_dir, '/', new_results_id, '-', str(count), '/'])
+            count += 1
+        os.mkdir(results_directory)
+
+    path_experiment_information = os.path.join(results_directory, 'experiment_information.yaml')
+    dam.save_yaml(path_experiment_information, information_experiment)
+
+    model_dir = os.path.join(results_directory, 'saved_model.h5')
+    os.mkdir(model_dir)
+    model_dir = ''.join([model_dir, '/saved_weights'])
+
+    temp_name_model = os.path.join(model_dir, 'best_model_.h5')
+    history_name = ''.join([results_directory, 'train_history_', new_results_id, "_.csv"])
+    callbacks = [ModelCheckpoint(temp_name_model, monitor="val_loss", save_best_only=True),
+                ReduceLROnPlateau(monitor='val_loss', patience=15),
+                CSVLogger(history_name),
+                EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
+
+    start_time = datetime.datetime.now()
+    trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
+                             epochs=max_epochs, verbose=1, callbacks=callbacks)
+
+    model.save(filepath=model_dir, save_format='tf')
+    print(f'model saved at {model_dir}')
+    print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+    # Now test in the test dataset
+    list_images = list()
+    list_predictions = list()
+    list_labels = list()
+    for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
+        image_labels = data_batch[0]
+        path_img = data_batch[1]
+        image, labels = image_labels
+        pred = model.predict(image)
+        prediction = list(pred[0]).index(max(list(pred[0])))
+        list_images.append(path_img.numpy()[0].decode("utf-8"))
+        list_predictions.append(prediction)
+        gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
+        list_labels.append(gt_label)
+
+    header_column = list()
+    header_column.insert(0, 'img name')
+    header_column.append('label')
+    header_column.append('predicted')
+
+    df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+
+    path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
+    df.to_csv(path_results_csv_file, index=False)
+
+    print(f'csv file with results saved: {path_results_csv_file}')
+
+    dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix.png')
+    daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_phase)
 
 
 
@@ -446,6 +514,13 @@ def main(_argv):
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
                         output_type=output_type, train_backbone=train_backbone,
                         verbose=train_verbose, gpus_available=len(physical_devices))
+
+    elif type_training == 'fit_model':
+        model_fit(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, fold=fold,
+                  batch_size=batch_size, learning_rate=0.0001, results_dir=results_dir,
+                  backbone_network=backbone_network, metrics=metrics, optimizer=optimizer,
+                  test_dataset=test_dataset, output_type=output_type, train_backbone=train_backbone)
+
     else:
         print(f'{type_training} not in options!')
 
