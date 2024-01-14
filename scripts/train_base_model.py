@@ -53,6 +53,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
     training_date_time = datetime.datetime.now()
     information_experiment = {'experiment folder': new_results_id,
                               'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
+                              'training type': 'fit model',
                               'name model': model_name,
                               'backbone': backbone_model,
                               'batch size': int(batch_size),
@@ -231,6 +232,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     training_date_time = datetime.datetime.now()
     information_experiment = {'experiment folder': new_results_id,
                               'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
+                              'training type': 'custom training',
                               'name model': model_name,
                               'backbone': backbone_model,
                               'batch size': int(batch_size),
