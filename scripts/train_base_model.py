@@ -59,6 +59,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
                               'learning rate': float(learning_rate),
                               'output type': output_type,
                               'fold': fold,
+                              'train backbone': str(train_backbone)
                               }
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
@@ -236,6 +237,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
                               'learning rate': float(learning_rate),
                               'output type': output_type,
                               'fold': fold,
+                              'train backbone': str(train_backbone)
                               }
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
