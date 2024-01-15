@@ -93,12 +93,6 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
                      EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
 
         start_time = datetime.datetime.now()
-        #train_x, y_phase, y_step = train_dataset
-        #val_x, val_y_phase, val_y_step = valid_dataset
-        #trained_mode = model.fit(x=train_x, y={"y_pahse": y_phase, "y_step": y_step},
-        #                         validation_data=(val_x, {"y_pahse": val_y_phase, "y_step": val_y_step}),
-        #                         epochs=max_epochs, verbose=1, callbacks=callbacks)
-
         trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
                                 epochs=max_epochs, verbose=1, callbacks=callbacks)
 
@@ -539,18 +533,18 @@ def main(_argv):
         test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
-        train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes,
-                                                  training_mode=True,
-                                                  input_size=input_sizes_models[backbone_network],
-                                                  batch_size=batch_size)
-        valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes,
-                                                  training_mode=False,
-                                                  input_size=input_sizes_models[backbone_network],
-                                                  batch_size=batch_size)
-        test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes,
-                                                 training_mode=False,
-                                                 input_size=input_sizes_models[backbone_network], batch_size=1,
-                                                 image_paths=True)
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes,
+                                              training_mode=True,
+                                              input_size=input_sizes_models[backbone_network],
+                                              batch_size=batch_size)
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes,
+                                              training_mode=False,
+                                              input_size=input_sizes_models[backbone_network],
+                                              batch_size=batch_size)
+    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes,
+                                             training_mode=False,
+                                             input_size=input_sizes_models[backbone_network], batch_size=1,
+                                             image_paths=True)
 
     unique_classes = len(selected_classes)
 
