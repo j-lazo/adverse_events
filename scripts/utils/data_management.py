@@ -494,9 +494,10 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
       return dataset
 
     list_files = list(dictionary_labels.keys())
+    if training_mode:
+        random.shuffle(list_files)
     path_imgs = list()
     images_class = list()
-    img_paths = list()
 
     if training_mode:
         random.shuffle(list_files)
@@ -521,6 +522,8 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
         labels = [tf.one_hot(v[0], 2) for v in images_class]
         labels_ds = tf.data.Dataset.from_tensor_slices(labels)
 
+    print(f'TF dataset with {len(path_imgs)} elements')
+
     if image_paths is True:
         ds = tf.data.Dataset.zip((images_ds, labels_ds), filenames_ds)
     else:
@@ -530,8 +533,6 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
         ds = configure_for_performance(ds)
     else:
         ds = ds.batch(batch_size)
-
-    print(f'TF dataset with {len(path_imgs)} elements')
     return ds
 
 

@@ -10,6 +10,8 @@ import tensorflow as tf
 import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger, TensorBoard
+
 
 input_sizes_models = {'vgg16': (224, 224), 'vgg19': (224, 224), 'inception_v3': (299, 299),
                           'resnet50': (224, 224), 'resnet101': (224, 224), 'mobilenet': (224, 224),
@@ -22,6 +24,141 @@ def correct_labels(list_labels):
     return out_list
 
 
+def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
+                     learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
+                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
+                     optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+                     test_dataset=None, output_type='', selected_classes='', train_backbone=False, verbose=False):
+
+    if model_name == 'simple_classifier':
+        model = simple_classifier(len(num_out_layer), backbone=backbone_network)
+        model.summary()
+        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
+        loss_fn = loss
+
+    elif model_name == 'two_outputs_classifier':
+        num_phases = 12
+        num_steps = 45
+        model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network, train_backbone=train_backbone)
+        model.summary()
+        model.compile(optimizer=optimizer,
+                           loss={'y_pahse': 'categorical_crossentropy',
+                                 'y_step': 'categorical_crossentropy'
+                                 },
+                           metrics={'y_pahse': ['accuracy', tf.keras.metrics.F1Score()],
+                                    'y_step': ['accuracy', tf.keras.metrics.F1Score()],
+                                    })
+
+        # ID name for the folder and results
+        backbone_model = backbone_network
+        new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
+                                                    batch_size=batch_size, backbone_model=backbone_model)
+
+        # the information needed for the yaml
+        training_date_time = datetime.datetime.now()
+        information_experiment = {'experiment folder': new_results_id,
+                                  'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
+                                  'name model': model_name,
+                                  'backbone': backbone_model,
+                                  'batch size': int(batch_size),
+                                  'learning rate': float(learning_rate),
+                                  'output type': output_type,
+                                  'fold': fold,
+                                  'train backbone': str(train_backbone)
+                                  }
+
+        results_directory = ''.join([results_dir, '/', new_results_id, '/'])
+        # if results experiment doesn't exist create it
+        if not os.path.isdir(results_directory):
+            os.mkdir(results_directory)
+        else:
+            count = 0
+            while os.path.isdir(results_directory):
+                results_directory = ''.join([results_dir, '/', new_results_id, '-', str(count), '/'])
+                count += 1
+            os.mkdir(results_directory)
+
+        path_experiment_information = os.path.join(results_directory, 'experiment_information.yaml')
+        dam.save_yaml(path_experiment_information, information_experiment)
+
+        model_dir = os.path.join(results_directory, 'saved_model.h5')
+        os.mkdir(model_dir)
+        model_dir = ''.join([model_dir, '/saved_weights'])
+
+        temp_name_model = os.path.join(model_dir, 'best_model_.h5')
+        history_name = ''.join([results_directory, 'train_history_', new_results_id, "_.csv"])
+        callbacks = [ModelCheckpoint(temp_name_model, monitor="val_loss", save_best_only=True),
+                     ReduceLROnPlateau(monitor='val_loss', patience=15),
+                     CSVLogger(history_name),
+                     EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
+
+        start_time = datetime.datetime.now()
+        #train_x, y_phase, y_step = train_dataset
+        #val_x, val_y_phase, val_y_step = valid_dataset
+        #trained_mode = model.fit(x=train_x, y={"y_pahse": y_phase, "y_step": y_step},
+        #                         validation_data=(val_x, {"y_pahse": val_y_phase, "y_step": val_y_step}),
+        #                         epochs=max_epochs, verbose=1, callbacks=callbacks)
+
+        trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
+                                epochs=max_epochs, verbose=1, callbacks=callbacks)
+
+        model.save(filepath=model_dir, save_format='tf')
+        print(f'model saved at {model_dir}')
+        print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+        # Now test in the test dataset
+
+        print(f'Making predictions on test dataset')
+        # 2Do load saved model
+
+        list_predictions_phases = list()
+        list_predictions_steps = list()
+        list_images = list()
+        list_labels_phase = list()
+        list_labels_step = list()
+        for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
+            image_labels = data_batch[0]
+            path_img = data_batch[1]
+            image, labels = image_labels
+
+            pred_phase, pred_step = model.predict(image)
+            prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
+            prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
+
+            list_images.append(path_img.numpy())
+            list_predictions_phases.append(prediction_phase)
+            list_predictions_steps.append(prediction_steps)
+
+            label_phase, label_step = labels
+            gt_phase = list(label_phase.numpy()[0]).index(max(list(label_phase.numpy()[0])))
+            gt_step = list(label_step.numpy()[0]).index(max(list(label_step.numpy()[0])))
+            list_labels_phase.append(gt_phase)
+            list_labels_step.append(gt_step)
+
+        header_column = list()
+        header_column.insert(0, 'img name')
+        header_column.append('label phase')
+        header_column.append('predicted phase')
+        header_column.append('label step')
+        header_column.append('predicted step')
+
+        df = pd.DataFrame(list(zip(list_images, list_labels_phase, list_predictions_phases,
+                                   list_labels_step, list_predictions_steps)), columns=header_column)
+
+        path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
+        df.to_csv(path_results_csv_file, index=False)
+
+        print(f'csv file with results saved: {path_results_csv_file}')
+
+        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_phase.png')
+        daa.compute_confusion_matrix(list_labels_phase, list_predictions_phases, plot_figure=False,
+                                     dir_save_fig=dir_conf_matrix_phase)
+        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_step.png')
+        daa.compute_confusion_matrix(list_labels_step, list_predictions_steps, plot_figure=False,
+                                     dir_save_fig=dir_conf_matrix_step)
+
+
+
 def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
@@ -31,7 +168,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     def train_step(images, labels):
         with tf.GradientTape() as tape:
             labels_1, labels_2 = labels
+            print(labels_1)
+            print(labels_2)
             predictions_1, predictions_2 = model(images, training=True)
+            print(predictions_1)
+            print(predictions_2)
             t_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
             t_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
             t_loss = tf.reduce_mean(t_loss_1) + tf.reduce_mean(t_loss_2)
@@ -226,7 +367,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             print('Early stopping triggered: wait time > patience')
             break
 
-        if epoch%5 == 0:
+        if epoch % 5 == 0:
             df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
                                        train_accuracy_list_1, train_accuracy_list_2,
                                        val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
@@ -234,12 +375,19 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
             df.to_csv(path_history_csv_file, index=False)
 
-
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
     print('Total Training TIME:', (datetime.datetime.now() - start_time))
 
     # save history
+
+    print(len(epoch_counter), epoch_counter)
+    print(len(train_loss_list), train_loss_list)
+    print(len(val_loss_list), val_loss_list)
+    print(len(train_accuracy_list_1), train_accuracy_list_1)
+    print(len(train_accuracy_list_2), train_accuracy_list_2)
+    print(len(val_accuracy_list_1), val_accuracy_list_1)
+    print(len(val_accuracy_list_2), val_accuracy_list_2)
 
     df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
                                train_accuracy_list_1, train_accuracy_list_2,
@@ -269,7 +417,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
             prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
             prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
 
-            list_images.append(path_img)
+            list_images.append(path_img.numpy())
             list_predictions_phases.append(prediction_phase)
             list_predictions_steps.append(prediction_steps)
 
@@ -391,13 +539,18 @@ def main(_argv):
         test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
-    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes, training_mode=True,
-                                              input_size=input_sizes_models[backbone_network], batch_size=batch_size)
-    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                              input_size=input_sizes_models[backbone_network], batch_size=batch_size)
-    test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes, training_mode=False,
-                                             input_size=input_sizes_models[backbone_network], batch_size=2,
-                                             image_paths=True)
+        train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes,
+                                                  training_mode=True,
+                                                  input_size=input_sizes_models[backbone_network],
+                                                  batch_size=batch_size)
+        valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, selected_labels=selected_classes,
+                                                  training_mode=False,
+                                                  input_size=input_sizes_models[backbone_network],
+                                                  batch_size=batch_size)
+        test_dataset = dam.make_tf_image_dataset(test_dataset_dict, selected_labels=selected_classes,
+                                                 training_mode=False,
+                                                 input_size=input_sizes_models[backbone_network], batch_size=1,
+                                                 image_paths=True)
 
     unique_classes = len(selected_classes)
 
@@ -408,6 +561,14 @@ def main(_argv):
                         optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
                         output_type=output_type, selected_classes=selected_classes, train_backbone=train_backbone,
                         verbose=train_verbose)
+
+    elif type_training == 'fit_model':
+
+        model_fit(name_model, train_dataset, valid_dataset, epochs, num_out_layer=unique_classes, fold=fold,
+                  batch_size=batch_size, learning_rate=0.0001, results_dir=results_dir,
+                  backbone_network=backbone_network, metrics=metrics, optimizer=optimizer,
+                  test_dataset=test_dataset, output_type=output_type, train_backbone=train_backbone)
+
     else:
         print(f'{type_training} not in options!')
 
