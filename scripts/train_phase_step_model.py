@@ -93,8 +93,8 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, num_out_laye
                      EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
 
         start_time = datetime.datetime.now()
-        #trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
-        #                        epochs=max_epochs, verbose=1, callbacks=callbacks)
+        trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
+                                epochs=max_epochs, verbose=1, callbacks=callbacks)
 
         model.save(filepath=model_dir, save_format='tf')
         print(f'model saved at {model_dir}')
