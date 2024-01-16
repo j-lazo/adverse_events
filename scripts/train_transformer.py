@@ -28,17 +28,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
               num_classes, patience=15, batch_size=2, learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'),
               loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
               optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-              test_dataset=None, output_type='', train_backbone=False):
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-    print('model name:', model_name)
-    if model_name == 'basic_transformer':
-
-        model = create_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
-                          transformer_layers, num_heads, transformer_units, mlp_head_units,
-                          num_classes)
-        model.summary()
-        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+              test_dataset=None, output_type='', gpus_available=None):
 
     # ID name for the folder and results
     new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
@@ -76,49 +66,124 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
 
     temp_name_model = os.path.join(model_dir, 'best_model_.h5')
     history_name = ''.join([results_directory, 'train_history_', new_results_id, "_.csv"])
-    callbacks = [ModelCheckpoint(temp_name_model, monitor="val_loss", save_best_only=True),
-                ReduceLROnPlateau(monitor='val_loss', patience=15),
-                CSVLogger(history_name),
-                EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
 
-    start_time = datetime.datetime.now()
-    trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
-                             epochs=max_epochs, verbose=1, callbacks=callbacks)
+    if gpus_available > 1:
+        strategy = tf.distribute.MirroredStrategy()
+        #strategy = None
+    else:
+        strategy = None
 
-    model.save(filepath=model_dir, save_format='tf')
-    print(f'model saved at {model_dir}')
-    print('Total Training TIME:', (datetime.datetime.now() - start_time))
+    if strategy:
+        with strategy.scope():
 
-    # Now test in the test dataset
-    list_images = list()
-    list_predictions = list()
-    list_labels = list()
-    for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
-        image_labels = data_batch[0]
-        path_img = data_batch[1]
-        image, labels = image_labels
-        pred = model.predict(image)
-        prediction = list(pred[0]).index(max(list(pred[0])))
-        list_images.append(path_img.numpy()[0].decode("utf-8"))
-        list_predictions.append(prediction)
-        gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
-        list_labels.append(gt_label)
+            if model_name == 'basic_transformer':
+                optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+                model = create_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
+                                              transformer_layers, num_heads, transformer_units, mlp_head_units,
+                                              num_classes)
+                model.summary()
+                model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
-    header_column = list()
-    header_column.insert(0, 'img name')
-    header_column.append('label')
-    header_column.append('predicted')
+            # Train the model on all available devices.
+            callbacks = [ModelCheckpoint(temp_name_model, monitor="val_loss", save_best_only=True),
+                        ReduceLROnPlateau(monitor='val_loss', patience=15),
+                        CSVLogger(history_name),
+                        EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
 
-    df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+            start_time = datetime.datetime.now()
+            print('Multi-GPU training')
+            trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
+                                     epochs=max_epochs, verbose=1, callbacks=callbacks)
 
-    path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
-    df.to_csv(path_results_csv_file, index=False)
+            model.save(filepath=model_dir, save_format='tf')
+            print(f'model saved at {model_dir}')
+            print('Total Training TIME:', (datetime.datetime.now() - start_time))
 
-    print(f'csv file with results saved: {path_results_csv_file}')
+            # Now test in the test dataset
+            list_images = list()
+            list_predictions = list()
+            list_labels = list()
+            for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
+                image_labels = data_batch[0]
+                path_img = data_batch[1]
+                image, labels = image_labels
+                pred = model.predict(image)
+                prediction = list(pred[0]).index(max(list(pred[0])))
+                list_images.append(path_img.numpy()[0].decode("utf-8"))
+                list_predictions.append(prediction)
+                gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
+                list_labels.append(gt_label)
 
-    dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix.png')
-    daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
-                                 dir_save_fig=dir_conf_matrix_phase)
+            header_column = list()
+            header_column.insert(0, 'img name')
+            header_column.append('label')
+            header_column.append('predicted')
+
+            df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+
+            path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
+            df.to_csv(path_results_csv_file, index=False)
+
+            print(f'csv file with results saved: {path_results_csv_file}')
+
+            dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix.png')
+            daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
+                                         dir_save_fig=dir_conf_matrix_phase)
+
+    else:
+        if model_name == 'basic_transformer':
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            model = create_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
+                                          transformer_layers, num_heads, transformer_units, mlp_head_units,
+                                          num_classes)
+            model.summary()
+            model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+        # Train the model on all available devices.
+        callbacks = [ModelCheckpoint(temp_name_model, monitor="val_loss", save_best_only=True),
+                     ReduceLROnPlateau(monitor='val_loss', patience=15),
+                     CSVLogger(history_name),
+                     EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)]
+
+        start_time = datetime.datetime.now()
+        print('Multi-GPU training')
+        trained_mode = model.fit(x=train_dataset, validation_data=valid_dataset,
+                                 epochs=max_epochs, verbose=1, callbacks=callbacks)
+
+        model.save(filepath=model_dir, save_format='tf')
+        print(f'model saved at {model_dir}')
+        print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+        # Now test in the test dataset
+        list_images = list()
+        list_predictions = list()
+        list_labels = list()
+        for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
+            image_labels = data_batch[0]
+            path_img = data_batch[1]
+            image, labels = image_labels
+            pred = model.predict(image)
+            prediction = list(pred[0]).index(max(list(pred[0])))
+            list_images.append(path_img.numpy()[0].decode("utf-8"))
+            list_predictions.append(prediction)
+            gt_label = list(labels.numpy()[0]).index(max(list(labels.numpy()[0])))
+            list_labels.append(gt_label)
+
+        header_column = list()
+        header_column.insert(0, 'img name')
+        header_column.append('label')
+        header_column.append('predicted')
+
+        df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+
+        path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
+        df.to_csv(path_results_csv_file, index=False)
+
+        print(f'csv file with results saved: {path_results_csv_file}')
+
+        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix.png')
+        daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
+                                     dir_save_fig=dir_conf_matrix_phase)
 
 
 
@@ -509,7 +574,7 @@ def main(_argv):
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_sizes_models[backbone_network], batch_size=batch_size)
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
-                                             input_size=input_sizes_models[backbone_network], batch_size=1,
+                                             input_size=input_sizes_models[backbone_network], batch_size=len(physical_devices),
                                              image_paths=True)
 
     num_patches = (image_size // patch_size) ** 2
@@ -530,8 +595,8 @@ def main(_argv):
                   test_dataset=test_dataset, output_type=output_type,
                   input_shape=model_input_shape, image_size=image_size, patch_size=patch_size, num_patches=num_patches,
                   projection_dim=projection_dim, transformer_layers=transformer_layers, num_heads=num_heads,
-                  transformer_units=transformer_units, mlp_head_units=mlp_head_u, num_classes=num_classes
-                  )
+                  transformer_units=transformer_units, mlp_head_units=mlp_head_u, num_classes=num_classes,
+                  gpus_available=len(physical_devices))
 
     else:
         print(f'{type_training} not in options!')
@@ -561,10 +626,10 @@ if __name__ == '__main__':
     flags.DEFINE_integer('patch_size', 16, 'size of the patch')
     flags.DEFINE_integer('input_shape', 224, 'input shape')
     flags.DEFINE_integer('image_size', 224, 'size of the input image') # or 72?
-    flags.DEFINE_integer('projection_dim', 256, 'projections dim') # or 64, 768
+    flags.DEFINE_integer('projection_dim', 256, 'projections dim') # or 64, 768?
     flags.DEFINE_integer('transformer_layers', 8, 'num of layers in the transformer')
     flags.DEFINE_integer('num_heads', 4, 'number of heads')
-    flags.DEFINE_list('mlp_head_units', [2048, 1024], 'number of mlp head units')
+    flags.DEFINE_list('mlp_head_units', [256, 128], 'number of mlp head units')
     flags.DEFINE_integer('num_classes', 2, 'number of classes')
 
     try:
