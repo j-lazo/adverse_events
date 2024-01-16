@@ -1,7 +1,6 @@
 import keras
 import tensorflow as tf
 from keras import layers
-#from keras import ops
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -13,7 +12,6 @@ class Patches(layers.Layer):
 
     def call(self, images):
         input_shape = tf.shape(images)
-        #input_shape = ops.shape(images)
         batch_size = input_shape[0]
         height = input_shape[1]
         width = input_shape[2]
@@ -25,14 +23,6 @@ class Patches(layers.Layer):
                                            rates=[1, 1, 1, 1],
                                            padding="VALID",
                                            )
-        """patches = ops.reshape(
-            patches,
-            (
-                batch_size,
-                num_patches_h * num_patches_w,
-                self.patch_size * self.patch_size * channels,
-            ),
-        )"""
         patches = tf.reshape(
             patches,
             (
@@ -55,9 +45,6 @@ def visualize_patches(x_train, patch_size, image_size):
     plt.imshow(image.astype("uint8"))
     plt.axis("off")
 
-    #resized_image = ops.image.resize(
-    #    ops.convert_to_tensor([image]), size=(image_size, image_size))
-
     resized_image = tf.image.resize(
         tf.convert_to_tensor([image]), size=(image_size, image_size))
 
@@ -71,8 +58,6 @@ def visualize_patches(x_train, patch_size, image_size):
     plt.figure(figsize=(4, 4))
     for i, patch in enumerate(patches[0]):
         ax = plt.subplot(n, n, i + 1)
-        #patch_img = ops.reshape(patch, (patch_size, patch_size, 3))
-        #plt.imshow(ops.convert_to_numpy(patch_img).astype("uint8"))
         patch_img = tf.reshape(patch, (patch_size, patch_size, 3))
         plt.imshow(tf.convert_to_numpy(patch_img).astype("uint8"))
         plt.axis("off")

@@ -561,8 +561,7 @@ if __name__ == '__main__':
     flags.DEFINE_integer('patch_size', 16, 'size of the patch')
     flags.DEFINE_integer('input_shape', 224, 'input shape')
     flags.DEFINE_integer('image_size', 224, 'size of the input image') # or 72?
-    #flags.DEFINE_integer('projection_dim', 64, 'projections dim')
-    flags.DEFINE_integer('projection_dim', 768, 'projections dim')
+    flags.DEFINE_integer('projection_dim', 256, 'projections dim') # or 64, 768
     flags.DEFINE_integer('transformer_layers', 8, 'num of layers in the transformer')
     flags.DEFINE_integer('num_heads', 4, 'number of heads')
     flags.DEFINE_list('mlp_head_units', [2048, 1024], 'number of mlp head units')
