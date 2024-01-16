@@ -112,7 +112,7 @@ class PatchEncoder(layers.Layer):
         return encoded
 
 
-def mlp(x, hidden_units, dropout_rate=0.5):
+def mlp(x, hidden_units, dropout_rate=0.2):
     for units in hidden_units:
         x = layers.Dense(units, activation=keras.activations.gelu)(x)
         x = layers.Dropout(dropout_rate)(x)
