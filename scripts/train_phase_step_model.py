@@ -526,11 +526,11 @@ def main(_argv):
         test_annotations_file_path_1 = os.path.join(path_test_annotations_1, test_annotations_file_name_1)
         test_annotations_file_path_2 = os.path.join(path_test_annotations_2, test_annotations_file_name_2)
 
-        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=1)
-        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=1)
+        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type)
+        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type)
 
-        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type, ratio=1)
-        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type, ratio=1)
+        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type)
+        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
     train_dataset = dam.make_tf_image_dataset(train_dataset_dict, selected_labels=selected_classes,
