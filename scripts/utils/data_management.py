@@ -199,6 +199,23 @@ def load_dataset_from_directory(path_frames, path_annotations, output_type='bina
                                                   'Event_ID': d['Event_ID']
                                                   } for d in annotated_frames if d['Frame_id'] in list_imgs}
 
+        elif output_type == 'class_and_grade':
+
+            dict_frames = {case + d['Frame_id']: {'case_id': case,
+                                                  'Frame_id': d['Frame_id'],
+                                                  'Path_img': os.path.join(path_frames, case, d['Frame_id'] + '.jpg'),
+                                                  'Phase_gt': d['Phase_gt'],
+                                                  'Step_gt': d['Step_gt'],
+                                                  'Overall': d['Overall'],
+                                                  'Bleeding': d['Bleeding'],
+                                                  'Mechanical injury': d['Mechanical injury'],
+                                                  'Thermal injury': d['Thermal injury'],
+                                                  'Bleeding grade': get_bleeding_level(d),
+                                                  'Mechanical injury grade': get_mi_level(d),
+                                                  'Thermal injury grade': get_ti_level(d),
+                                                  'Event_ID': d['Event_ID']
+                                                  } for d in annotated_frames if d['Frame_id'] in list_imgs}
+
         output_dict = {**output_dict, **dict_frames}
         # option b) with ChainMap, check which one is more efficient
         # output_dict = dict(ChainMap({}, output_dict, dict_frames))
@@ -236,7 +253,6 @@ def load_dataset_from_directory(path_frames, path_annotations, output_type='bina
 
     if ratio:
         new_output_dict = {}
-        temp_dict = {}
         total_neg = 0
         keys_dict = list(output_dict.keys())
         total_frames = len(keys_dict)
@@ -257,10 +273,6 @@ def load_dataset_from_directory(path_frames, path_annotations, output_type='bina
                 if random.random() <= prob:
                     #temp_dict = output_dict[k]
                     new_output_dict[k] = output_dict[k]
-
-            #new_output_dict = {**new_output_dict, **temp_dict}
-            #print(temp_dict)
-            #print(new_output_dict)
 
         output_dict = copy.copy(new_output_dict)
 
@@ -452,7 +464,7 @@ class FrameGenerator:
 
 def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch_size=2, training_mode=False,
                     num_repeat=None, custom_training=False, ignore_labels=False, image_paths=False,
-                    input_size=[250,250]):
+                    multi_output_size=[12, 45], input_size=[250,250], extract_label_by_keys=[]):
 
     def decode_image(file_name):
         image = tf.io.read_file(file_name)
@@ -502,26 +514,45 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
     if training_mode:
         random.shuffle(list_files)
 
-    for img_id in list_files:
-        path_imgs.append(dictionary_labels[img_id]['Path_img'])
-        extracted_labels = [dictionary_labels[img_id][label] for label in selected_labels]
-        images_class.append(extracted_labels)
+    if extract_label_by_keys:
+        grade_class = list()
 
-    filenames_ds = tf.data.Dataset.from_tensor_slices(path_imgs)
-    images_ds = filenames_ds.map(parse_image,  num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        for img_id in list_files:
+            path_imgs.append(dictionary_labels[img_id]['Path_img'])
+            # the list for the grading
+            level_labels = [dictionary_labels[img_id][label] for label in extract_label_by_keys]
+            grade_class.append(level_labels)
+            # the list for class
+            class_labels = [dictionary_labels[img_id][label] for label in selected_labels]
+            images_class.append(class_labels)
 
-    if len(images_class[0]) > 1:
-        label_1 = [tf.one_hot(v[0], 12) for v in images_class]
-        label_2 = [tf.one_hot(v[1], 45) for v in images_class]
+        label_1 = [tf.one_hot(v, multi_output_size[0], on_value=0, off_value=1) for v in images_class]
+        label_2 = grade_class
         labels_ds1 = tf.data.Dataset.from_tensor_slices(label_1)
         labels_ds2 = tf.data.Dataset.from_tensor_slices(label_2)
         labels_ds = tf.data.Dataset.zip((labels_ds1, labels_ds2))
-    else:
-        unique_classes = list(np.unique(images_class))
-        #labels = [unique_classes.index(v) for v in images_class]
-        labels = [tf.one_hot(v[0], 2) for v in images_class]
-        labels_ds = tf.data.Dataset.from_tensor_slices(labels)
 
+    else:
+
+        for img_id in list_files:
+            path_imgs.append(dictionary_labels[img_id]['Path_img'])
+            extracted_labels = [dictionary_labels[img_id][label] for label in selected_labels]
+            images_class.append(extracted_labels)
+
+        if len(images_class[0]) > 1:
+            label_1 = [tf.one_hot(v[0], multi_output_size[0]) for v in images_class]
+            label_2 = [tf.one_hot(v[1], multi_output_size[1]) for v in images_class]
+            labels_ds1 = tf.data.Dataset.from_tensor_slices(label_1)
+            labels_ds2 = tf.data.Dataset.from_tensor_slices(label_2)
+            labels_ds = tf.data.Dataset.zip((labels_ds1, labels_ds2))
+        else:
+            unique_classes = list(np.unique(images_class))
+            #labels = [unique_classes.index(v) for v in images_class]
+            labels = [tf.one_hot(v[0], 2) for v in images_class]
+            labels_ds = tf.data.Dataset.from_tensor_slices(labels)
+
+    filenames_ds = tf.data.Dataset.from_tensor_slices(path_imgs)
+    images_ds = filenames_ds.map(parse_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     print(f'TF dataset with {len(path_imgs)} elements')
 
     if image_paths is True:
