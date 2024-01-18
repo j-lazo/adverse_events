@@ -77,10 +77,15 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
         with strategy.scope():
 
             if model_name == 'basic_transformer':
-                optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
                 model = create_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
                                               transformer_layers, num_heads, transformer_units, mlp_head_units,
                                               num_classes)
+
+                optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+                loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+                metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
+                           tf.keras.metrics.Recall(name='recall'), tf.keras.metrics.F1Score()]
+
                 model.summary()
                 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
