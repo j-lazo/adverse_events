@@ -25,7 +25,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
               loss={'classi': tf.keras.losses.SparseCategoricalCrossentropy(),
                     'grading': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)}, metrics=[],
               optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-              test_dataset=None, output_type='', train_backbone=False):
+              test_dataset=None, output_type=''):
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     print('model name:', model_name)
@@ -118,19 +118,32 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
                                  dir_save_fig=dir_conf_matrix_phase)
 
 
-def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_out_layer, fold, patience=15, batch_size=2,
-                     learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet50',
-                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=[],
-                     optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                     test_dataset=None, output_type='', selected_classes='', train_backbone=False, verbose=False):
-    @tf.function
+def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, input_shape, image_size,
+              patch_size, num_patches, projection_dim, transformer_layers, num_heads, transformer_units, mlp_head_units,
+              num_classes, patience=15, batch_size=2, learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'),
+              loss={'classi': tf.keras.losses.SparseCategoricalCrossentropy(),
+                    'grading': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)}, metrics=[],
+              optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+              test_dataset=None, output_type='', verbose=False, gpus_available=None):
+
+    loss_fn_1 = loss['classi']
+    loss_fn_2 = loss['grading']
+    #@tf.function
     def train_step(images, labels):
         with tf.GradientTape() as tape:
             labels_1, labels_2 = labels
             predictions_1, predictions_2 = model(images, training=True)
-
+            print(np.shape(predictions_1.numpy()), 'predictions 1')
+            print(np.shape(predictions_2.numpy()), 'predictions 2')
+            print(np.shape(labels_1), 'label 1')
+            print(np.shape(labels_2), 'label 2')
+            print('predictions 1:', predictions_1.numpy())
+            print('labels 1:', labels_1)
             t_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
             t_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
+            print('predictions 2:', predictions_2.numpy())
+            print('labels 2:', labels_2)
+            #print('loss 2 ok')
             t_loss = tf.reduce_mean(t_loss_1) + tf.reduce_mean(t_loss_2)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
@@ -163,26 +176,16 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
         predictions = model(images, training=False)
         return predictions
 
-    if model_name == 'simple_classifier':
-        model = simple_classifier(len(num_out_layer), backbone=backbone_network)
+    if model_name == 'multi_output_transformer':
+
+        model = create_multi_output_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
+                          transformer_layers, num_heads, transformer_units, mlp_head_units,
+                          num_classes)
         model.summary()
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
-        loss_fn = loss
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
     elif model_name == 'two_outputs_classifier':
-        num_phases = 12
-        num_steps = 45
-        model = two_outputs_classifier(num_phases, num_steps, backbone=backbone_network, train_backbone=train_backbone)
-        model.summary()
-        model.compile(optimizer=optimizer,
-                           loss={'y_pahse': 'categorical_crossentropy',
-                                 'y_step': 'categorical_crossentropy'
-                                 },
-                           metrics={'y_pahse': 'accuracy',
-                                    'y_step': 'accuracy'
-                                    })
-        loss_fn_1 = tf.keras.losses.CategoricalCrossentropy()
-        loss_fn_2 = tf.keras.losses.CategoricalCrossentropy()
+        pass
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
@@ -194,21 +197,19 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, num_ou
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
 
     # ID name for the folder and results
-    backbone_model = backbone_network
     new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
-                                                batch_size=batch_size, backbone_model=backbone_model)
+                                                batch_size=batch_size, backbone_model='_')
 
     # the information needed for the yaml
     training_date_time = datetime.datetime.now()
     information_experiment = {'experiment folder': new_results_id,
                               'date': training_date_time.strftime("%d-%m-%Y %H:%M"),
+                              'training type': 'custom training',
                               'name model': model_name,
-                              'backbone': backbone_model,
                               'batch size': int(batch_size),
                               'learning rate': float(learning_rate),
                               'output type': output_type,
                               'fold': fold,
-                              'selected classes': selected_classes,
                               }
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
@@ -509,9 +510,13 @@ def main(_argv):
 
     train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, selected_labels=selected_classes,
                                               input_size=input_size_model, batch_size=batch_size,
-                                              multi_output_size=[2, len(grade_keys)],
+                                              multi_output_size=[4, len(grade_keys)],
                                               extract_label_by_keys=grade_keys)
-
+    #for img, label in train_dataset:
+    #    print(label[0].numpy())
+    #    print(np.shape(label[0].numpy()))
+    #    print(label[1].numpy())
+    #    print(np.shape(label[1].numpy()))
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_size_model, batch_size=batch_size,
                                               multi_output_size=[2, len(grade_keys)],
@@ -527,12 +532,15 @@ def main(_argv):
     transformer_units = [projection_dim * 2, projection_dim, ]  # Size of the transformer layers
     mlp_head_u = [int(x) for x in mlp_head_units]
     model_input_shape = (input_shape, input_shape, 3)
+    num_classes = [4, 4]
     if type_training == 'custom_training':
 
-        custom_training(name_model, train_dataset, valid_dataset, epochs, fold=fold, patience=15,
-                        batch_size=batch_size, backbone_network=backbone_network, loss=loss, metrics=metrics,
-                        optimizer=optimizer, results_dir=results_dir, test_dataset=test_dataset,
-                        output_type=output_type, train_backbone=train_backbone,
+        custom_training(name_model, train_dataset, valid_dataset, epochs, fold=fold,
+                  batch_size=batch_size, learning_rate=0.0001, results_dir=results_dir, metrics=metrics, optimizer=optimizer,
+                  test_dataset=test_dataset, output_type=output_type,
+                  input_shape=model_input_shape, image_size=image_size, patch_size=patch_size, num_patches=num_patches,
+                  projection_dim=projection_dim, transformer_layers=transformer_layers, num_heads=num_heads,
+                  transformer_units=transformer_units, mlp_head_units=mlp_head_u, num_classes=num_classes,
                         verbose=train_verbose, gpus_available=len(physical_devices))
 
     elif type_training == 'fit_model':

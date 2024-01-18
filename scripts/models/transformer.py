@@ -171,7 +171,7 @@ def create_vit_classifier(input_shape, image_size, patch_size, num_patches, proj
 
 def create_multi_output_vit_classifier(input_shape, image_size, patch_size, num_patches, projection_dim,
                           transformer_layers, num_heads, transformer_units, mlp_head_units,
-                          num_classes):
+                          num_classes=[2, 4]):
 
     data_augmentation = keras.Sequential(
         [
@@ -213,9 +213,20 @@ def create_multi_output_vit_classifier(input_shape, image_size, patch_size, num_
     # Add MLPs.
     features = mlp(representation_classi, hidden_units=mlp_head_units, dropout_rate=0.3)
     # Classify outputs.
-    classi = layers.Dense(num_classes, activation='softmax', name='classi')(features)
-    #gradi = layers.Dense(num_classes, activation='tanh', name='grading')(features)
-    gradi = layers.Dense(num_classes, activation='tanh', name='grading')(representation_gradin)
+    #classi = layers.Dense(2, activation='softmax', name='classi')(features)
+    out_class_layer = [layers.Dense(2, activation='softmax')(features) for _ in range(4)]
+    #classi_1 = layers.Dense(2, activation='softmax')(features)
+    #classi_2 = layers.Dense(2, activation='softmax')(features)
+    #classi_3 = layers.Dense(2, activation='softmax')(features)
+    #classi_4 = layers.Dense(2, activation='softmax')(features)
+    #classi = tf.concat([classi_1, classi_2, classi_3, classi_4], 0, name='classi')
+    #classi = (out_class_layer, 0, name='classi')
+    classi = tf.keras.layers.Concatenate(axis=0, name='classi')(out_class_layer)
+    #gradi = layers.Dense(num_classes[1], activation='tanh', name='grading')(features)
+    #gradi = layers.Dense(num_classes[1], activation='tanh', name='grading')(representation_gradin)
+    out_grade_layer = [layers.Dense(4, activation='tanh')(representation_gradin) for j in range(4)]
+    #gradi = tf.concat(out_grade_layer, 0, name='grading')
+    gradi = tf.keras.layers.Concatenate(axis=0, name='grading')(out_grade_layer)
     # Create the Keras model.
     model = keras.Model(inputs=inputs, outputs=[classi, gradi])
     return model
