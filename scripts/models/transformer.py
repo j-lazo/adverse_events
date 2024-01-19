@@ -176,7 +176,7 @@ def create_multi_output_vit_classifier(input_shape, image_size, patch_size, num_
     data_augmentation = keras.Sequential(
         [
             layers.Normalization(),
-            layers.Resizing(image_size, image_size),
+            # layers.Resizing(image_size, image_size),
             layers.RandomFlip("horizontal"),
             layers.RandomRotation(factor=0.02),
             layers.RandomZoom(height_factor=0.2, width_factor=0.2),
@@ -213,20 +213,14 @@ def create_multi_output_vit_classifier(input_shape, image_size, patch_size, num_
     # Add MLPs.
     features = mlp(representation_classi, hidden_units=mlp_head_units, dropout_rate=0.3)
     # Classify outputs.
-    #classi = layers.Dense(2, activation='softmax', name='classi')(features)
-    out_class_layer = [layers.Dense(2, activation='softmax')(features) for _ in range(4)]
-    #classi_1 = layers.Dense(2, activation='softmax')(features)
-    #classi_2 = layers.Dense(2, activation='softmax')(features)
-    #classi_3 = layers.Dense(2, activation='softmax')(features)
-    #classi_4 = layers.Dense(2, activation='softmax')(features)
-    #classi = tf.concat([classi_1, classi_2, classi_3, classi_4], 0, name='classi')
-    #classi = (out_class_layer, 0, name='classi')
-    classi = tf.keras.layers.Concatenate(axis=0, name='classi')(out_class_layer)
-    #gradi = layers.Dense(num_classes[1], activation='tanh', name='grading')(features)
-    #gradi = layers.Dense(num_classes[1], activation='tanh', name='grading')(representation_gradin)
-    out_grade_layer = [layers.Dense(4, activation='tanh')(representation_gradin) for j in range(4)]
+    out_class_layer = [layers.Reshape((1, 2))(layers.Dense(2, activation='softmax')(features)) for _ in range(4)]
+    classi = tf.keras.layers.Concatenate(axis=1, name='classi')(out_class_layer)
+    # Grade outputs
+    #out_grade_layer = [layers.Reshape((1, 4))(layers.Dense(4, activation='tanh')(representation_gradin)) for j in range(4)]
+    out_grade_layer = [layers.Reshape((1, 5))(layers.Dense(5, activation='tanh')(representation_gradin)) for j in
+                       range(4)]
     #gradi = tf.concat(out_grade_layer, 0, name='grading')
-    gradi = tf.keras.layers.Concatenate(axis=0, name='grading')(out_grade_layer)
+    gradi = tf.keras.layers.Concatenate(axis=1, name='grading')(out_grade_layer)
     # Create the Keras model.
     model = keras.Model(inputs=inputs, outputs=[classi, gradi])
     return model

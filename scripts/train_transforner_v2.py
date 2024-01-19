@@ -12,7 +12,8 @@ import utils.data_analysis as daa
 from absl import app, flags
 from absl.flags import FLAGS
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger, TensorBoard
-
+from sklearn.metrics import f1_score
+from sklearn.metrics import mean_squared_error
 
 def correct_labels(list_labels):
     out_list = [s.replace('-', ' ') for s in list_labels]
@@ -23,7 +24,7 @@ def model_fit(model_name, train_dataset, valid_dataset, max_epochs, fold, input_
               patch_size, num_patches, projection_dim, transformer_layers, num_heads, transformer_units, mlp_head_units,
               num_classes, patience=15, batch_size=2, learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'),
               loss={'classi': tf.keras.losses.SparseCategoricalCrossentropy(),
-                    'grading': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)}, metrics=[],
+                    'grading': tf.keras.losses.SparseCategoricalCrossentropy()}, metrics=[],
               optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
               test_dataset=None, output_type=''):
 
@@ -122,39 +123,60 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
               patch_size, num_patches, projection_dim, transformer_layers, num_heads, transformer_units, mlp_head_units,
               num_classes, patience=15, batch_size=2, learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'),
               loss={'classi': tf.keras.losses.SparseCategoricalCrossentropy(),
-                    'grading': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)}, metrics=[],
+                    'grading': tf.keras.losses.SparseCategoricalCrossentropy()}, metrics=[],
               optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
               test_dataset=None, output_type='', verbose=False, gpus_available=None):
 
     loss_fn_1 = loss['classi']
     loss_fn_2 = loss['grading']
+
     #@tf.function
-    def train_step(images, labels):
+    def train_step(images, labels, ratio_grade_loss=1.0):
         with tf.GradientTape() as tape:
             labels_1, labels_2 = labels
             predictions_1, predictions_2 = model(images, training=True)
-            print(np.shape(predictions_1.numpy()), 'predictions 1')
-            print(np.shape(predictions_2.numpy()), 'predictions 2')
-            print(np.shape(labels_1), 'label 1')
-            print(np.shape(labels_2), 'label 2')
-            print('predictions 1:', predictions_1.numpy())
-            print('labels 1:', labels_1)
+            #print(np.shape(predictions_1.numpy()), 'predictions 1')
+            #print(np.shape(predictions_2.numpy()), 'predictions 2')
+            #print(np.shape(labels_1), 'label 1')
+            #print(np.shape(labels_2), 'label 2')
+            #print('predictions 1:', predictions_1.numpy())
+            #print('labels 1:', labels_1)
             t_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
+            #print('loss 1 ok')
             t_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
-            print('predictions 2:', predictions_2.numpy())
-            print('labels 2:', labels_2)
+            #print('predictions 2:', predictions_2.numpy())
+            #print('labels 2:', labels_2)
             #print('loss 2 ok')
-            t_loss = tf.reduce_mean(t_loss_1) + tf.reduce_mean(t_loss_2)
+            t_loss = t_loss_1 + ratio_grade_loss * t_loss_2
+            #print('loss 1', t_loss_1)
+            #print('loss 2', t_loss_2)
+            #print('loss t', t_loss)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
 
         train_loss_val = train_loss(t_loss)
-        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
-        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
-        train_accuracy_val_1 = train_accuracy_1(labels_1, predictions_acc_1)
-        train_accuracy_val_2 = train_accuracy_2(labels_2, predictions_acc_2)
 
-        return train_loss_val, train_accuracy_val_1, train_accuracy_val_2
+        #predictions_acc_1 = tf.argmax(predictions_1, axis=1)
+        #predictions_acc_2 = tf.argmax(predictions_2, axis=1)
+        #print('Accuracies')
+        #print('labels 1', labels_1)
+        #print('predictions', predictions_1)
+        train_accuracy_val_1 = train_accuracy_1(labels_1, predictions_1)
+        train_accuracy_val_2 = train_accuracy_2(labels_2, predictions_2)
+        class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
+        #grade_f1 = [f1_score(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i], average='macro') for i in range(4)]
+        grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
+        losses = [train_loss_val, t_loss_1, t_loss_2]
+        metrics = [train_accuracy_val_1, train_accuracy_val_2, class_f1, grade_mse]
+
+        #print('f-1 class', class_f1)
+        #avg_class_f1 = np.mean(class_f1)
+        #print('f-1 average class', avg_class_f1)
+        #print('MSE grade', grade_mse)
+        #avg_grade_mse = np.mean(grade_mse)
+        #print('f-1 average grade:', avg_grade_mse)
+
+        return losses, metrics
 
     @tf.function
     def valid_step(images, labels):
@@ -189,9 +211,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
+    train_loss_classi = tf.keras.metrics.Mean(name='train_loss classi')
+    train_loss_grading = tf.keras.metrics.Mean(name='train_loss gradi')
     train_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_1')
     train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
+    valid_loss_classi = tf.keras.metrics.Mean(name='valid_loss classi')
+    valid_loss_grading = tf.keras.metrics.Mean(name='valid_loss gradi')
     valid_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_1')
     valid_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_2')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
@@ -236,6 +262,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     start_time = datetime.datetime.now()
     epoch_counter = list()
     train_loss_list = list()
+    train_classi_loss_list = list()
+    train_grading_loss_list = list()
     val_loss_list = list()
     train_accuracy_list_1 = list()
     train_accuracy_list_2 = list()
@@ -249,6 +277,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     for epoch in range(max_epochs):
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
+        train_classi_loss_list.append(train_loss_classi.result().numpy())
+        train_grading_loss_list.append(train_loss_grading.result().numpy())
         train_accuracy_list_1.append(train_accuracy_1.result().numpy())
         val_accuracy_list_2.append(train_accuracy_2.result().numpy())
 
@@ -258,9 +288,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         t = time.time()
         train_loss.reset_states()
+        train_loss_classi.reset_states()
+        train_loss_grading.reset_states()
         train_accuracy_1.reset_states()
         train_accuracy_2.reset_states()
         valid_loss.reset_states()
+
         valid_accuracy_1.reset_states()
         valid_accuracy_2.reset_states()
         step = 0
@@ -270,41 +303,56 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         header_column.insert(0, 'epoch')
         header_column.append('train loss')
         header_column.append('val loss')
-        header_column.append('acc phase training')
-        header_column.append('acc step training')
-        header_column.append('acc phase val')
+        header_column.append('acc classification training')
+        header_column.append('acc grading training')
+        header_column.append('acc classification val')
         header_column.append('acc phase step')
 
-        template = 'ETA: {} - epoch: {} loss: {:.5f}  acc phase: {:.5f}, acc step: {:.5f}'
+        template = ('ETA: {} - epoch: {} loss: {:.5f}  acc classification: {:.5f}, acc grading: {:.5f}, '
+                    'F-1 classification: {}, F-1 avg: {:.5f}, MSE grading: {}, MSE avg: {.5.f}')
         for x, train_labels in train_dataset:
             step += 1
             images = x
-            train_loss_value, t_acc_p, tacc_s = train_step(images, train_labels)
+            train_loses, train_metrics = train_step(images, train_labels)
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy phase', train_accuracy_1.result(), step=epoch)
-                tf.summary.scalar('accuracy step', train_accuracy_2.result(), step=epoch)
+                tf.summary.scalar('loss classification', train_loss_classi.result(), step=epoch)
+                tf.summary.scalar('loss grading', train_loss_grading.result(), step=epoch)
+                tf.summary.scalar('accuracy classification', train_accuracy_1.result(), step=epoch)
+                tf.summary.scalar('accuracy grading', train_accuracy_2.result(), step=epoch)
             if verbose:
-                print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss_value,
-                                      float(train_accuracy_1.result()), float(train_accuracy_2.result())))
+                #print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss.result(),
+                #                      float(train_accuracy_1.result()), float(train_accuracy_1.result()),
+                #                      train_metrics[2], np.mean(train_metrics[2]), train_metrics[3],
+                #                      np.mean(train_metrics[3])))
+                print(f'ETA: {round((time.time() - t) / 60, 2)} - epoch: {epoch + 1} loss: {train_loss.result():.5f}  '
+                      f'acc classification: {float(train_accuracy_1.result()):.5f}, '
+                      f'acc grading: {float(train_accuracy_1.result()):.5f}, '
+                                          f'F-1 classification: {train_metrics[2]}, '
+                      f'F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, '
+                      f'MSE avg: {np.mean(train_metrics[3]):.5f}')
 
-        print("Epoch: {}/{}, train loss: {:.5f}, train accuracy phase: {:.5f}, "
-              "train accuracy step: {:.5f}".format(epoch + 1,
-                                                  max_epochs,
-                                                  train_loss.result(),
-                                                  train_accuracy_1.result(),
-                                                  train_accuracy_2.result()))
+        ###############
+        print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
+              " train accuracy classification: {:.5f}, "
+              "train accuracy grading: {:.5f}".format(epoch + 1,
+                                                      max_epochs,
+                                                      train_loss.result(),
+                                                      train_loss_classi.result(),
+                                                      train_loss_grading.result(),
+                                                      train_accuracy_1.result(),
+                                                      train_accuracy_2.result()))
 
         for x, valid_labels in valid_dataset:
             valid_images = x
             valid_step(valid_images, valid_labels)
             with val_summary_writer.as_default():
                 tf.summary.scalar('loss', valid_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy phase', valid_accuracy_1.result(), step=epoch)
-                tf.summary.scalar('accuracy step', valid_accuracy_2.result(), step=epoch)
+                tf.summary.scalar('accuracy classification', valid_accuracy_1.result(), step=epoch)
+                tf.summary.scalar('accuracy gradding', valid_accuracy_2.result(), step=epoch)
 
-        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy phase: {:.5f}, "
-              "val accuracy step: {:.5f}".format(epoch + 1,
+        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy classification: {:.5f}, "
+              "val accuracy grading: {:.5f}".format(epoch + 1,
                                                   max_epochs,
                                                   valid_loss.result(),
                                                   train_accuracy_1.result(),
@@ -386,10 +434,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         header_column = list()
         header_column.insert(0, 'img name')
-        header_column.append('label phase')
-        header_column.append('predicted phase')
-        header_column.append('label step')
-        header_column.append('predicted step')
+        header_column.append('label class')
+        header_column.append('predicted class')
+        header_column.append('label grade')
+        header_column.append('predicted grade')
 
         df = pd.DataFrame(list(zip(list_images, list_labels_phase, list_predictions_phases,
                                    list_labels_step, list_predictions_steps)), columns=header_column)
@@ -399,10 +447,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         print(f'csv file with results saved: {path_results_csv_file}')
 
-        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_phase.png')
+        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_class.png')
         daa.compute_confusion_matrix(list_labels_phase, list_predictions_phases, plot_figure=False,
                                  dir_save_fig=dir_conf_matrix_phase)
-        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_step.png')
+        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_grade.png')
         daa.compute_confusion_matrix(list_labels_step, list_predictions_steps, plot_figure=False,
                                  dir_save_fig=dir_conf_matrix_step)
 
@@ -440,8 +488,8 @@ def main(_argv):
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
-    metrics = {'classi': ['accuracy', tf.keras.metrics.F1Score()],
-               'grading': ['accuracy', tf.keras.metrics.F1Score()],
+    metrics = {'classi': ['accuracy'], #tf.keras.metrics.Recall()], #, tf.keras.metrics.Recall()],
+               'grading': ['accuracy'], #tf.keras.metrics.Recall()]#, tf.keras.metrics.Recall()],
                }
     train_backbone = FLAGS.train_backbone
 

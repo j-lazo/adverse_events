@@ -526,8 +526,10 @@ def make_tf_image_dataset(dictionary_labels, selected_labels=['Bleeding'], batch
             class_labels = [dictionary_labels[img_id][label] for label in selected_labels]
             images_class.append(class_labels)
 
-        label_1 = [tf.one_hot(v, multi_output_size[0], on_value=0, off_value=1) for v in images_class]
-        label_2 = grade_class
+        #label_1 = [tf.one_hot(v, 2, on_value=0, off_value=1, dtype=tf.float32) for v in images_class]
+        label_1 = tf.convert_to_tensor(images_class, dtype=tf.float32) #images_class
+        label_2 = tf.convert_to_tensor(grade_class, dtype=tf.float32) #grade_class
+        #label_2 = [tf.one_hot(v, 5, dtype=tf.float32) for v in grade_class]#grade_class
         labels_ds1 = tf.data.Dataset.from_tensor_slices(label_1)
         labels_ds2 = tf.data.Dataset.from_tensor_slices(label_2)
         labels_ds = tf.data.Dataset.zip((labels_ds1, labels_ds2))
