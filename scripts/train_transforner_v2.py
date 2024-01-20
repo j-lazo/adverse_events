@@ -14,6 +14,7 @@ from absl.flags import FLAGS
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger, TensorBoard
 from sklearn.metrics import f1_score
 from sklearn.metrics import mean_squared_error
+from tensorflow.keras.utils import Progbar
 
 def correct_labels(list_labels):
     out_list = [s.replace('-', ' ') for s in list_labels]
@@ -181,7 +182,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     @tf.function
     def valid_step(images, labels):
         labels_1, labels_2 = labels
-        predictions_1, predictions_2 = model(images, training=False)
+        predictions_1, predictions_2 = model(images, training=True)
         v_loss_1 = loss_fn_1(y_true=labels_1, y_pred=predictions_1)
         v_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
         v_loss = tf.reduce_mean(v_loss_1) + tf.reduce_mean(v_loss_2)
@@ -190,8 +191,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         predictions_acc_2 = tf.argmax(predictions_2, axis=1)
         val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_acc_1)
         val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_acc_2)
+        val_class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
+        val_grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
+        losses = [val_loss, v_loss_1, v_loss_2]
+        metrics = [val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse]
 
-        return val_loss, val_accuracy_val_1, val_accuracy_val_2
+        return losses, metrics
 
     @tf.function
     def prediction_step(images):
@@ -216,8 +221,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     train_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_1')
     train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-    valid_loss_classi = tf.keras.metrics.Mean(name='valid_loss classi')
-    valid_loss_grading = tf.keras.metrics.Mean(name='valid_loss gradi')
+    val_loss_classi = tf.keras.metrics.Mean(name='valid_loss classi')
+    val_loss_grading = tf.keras.metrics.Mean(name='valid_loss gradi')
     valid_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_1')
     valid_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_2')
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
@@ -274,13 +279,32 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     os.mkdir(model_dir)
     model_dir = ''.join([model_dir, '/saved_weights'])
 
+    # headers pd Dataframe
+    header_column = list()
+    header_column.insert(0, 'epoch')
+    header_column.append('train loss')
+    header_column.append('val loss')
+    header_column.append('acc classification training')
+    header_column.append('acc grading training')
+    header_column.append('acc classification val')
+    header_column.append('acc phase step')
+
+    template = ('ETA: {} - epoch: {} loss: {:.5f}  acc classification: {:.5f}, acc grading: {:.5f}, '
+                'F-1 classification: {}, F-1 avg: {:.5f}, MSE grading: {}, MSE avg: {.5.f}')
+
     for epoch in range(max_epochs):
+    #    pb_i = Progbar(num_training_samples, stateful_metrics=metrics_names)
+    #    for j in range(num_training_samples // batch_size):
+    #        time.sleep(0.3)
+    #        values = [('acc', np.random.random(1)), ('pr', np.random.random(1))]
+    #        pb_i.add(batch_size, values=values)
+
         epoch_counter.append(epoch)
         train_loss_list.append(train_loss.result().numpy())
         train_classi_loss_list.append(train_loss_classi.result().numpy())
         train_grading_loss_list.append(train_loss_grading.result().numpy())
         train_accuracy_list_1.append(train_accuracy_1.result().numpy())
-        val_accuracy_list_2.append(train_accuracy_2.result().numpy())
+        train_accuracy_list_2.append(train_accuracy_2.result().numpy())
 
         val_loss_list.append(valid_loss.result().numpy())
         val_accuracy_list_1.append(valid_accuracy_1.result().numpy())
@@ -296,20 +320,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         valid_accuracy_1.reset_states()
         valid_accuracy_2.reset_states()
+        val_loss_classi.reset_states()
+        val_loss_grading.reset_states()
         step = 0
 
-        # headers pd Dataframe
-        header_column = list()
-        header_column.insert(0, 'epoch')
-        header_column.append('train loss')
-        header_column.append('val loss')
-        header_column.append('acc classification training')
-        header_column.append('acc grading training')
-        header_column.append('acc classification val')
-        header_column.append('acc phase step')
-
-        template = ('ETA: {} - epoch: {} loss: {:.5f}  acc classification: {:.5f}, acc grading: {:.5f}, '
-                    'F-1 classification: {}, F-1 avg: {:.5f}, MSE grading: {}, MSE avg: {.5.f}')
         for x, train_labels in train_dataset:
             step += 1
             images = x
@@ -325,7 +339,8 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                 #                      float(train_accuracy_1.result()), float(train_accuracy_1.result()),
                 #                      train_metrics[2], np.mean(train_metrics[2]), train_metrics[3],
                 #                      np.mean(train_metrics[3])))
-                print(f'ETA: {round((time.time() - t) / 60, 2)} - epoch: {epoch + 1} loss: {train_loss.result():.5f}  '
+                print(f'ETA: {round((time.time() - t) / 60, 2)} - epoch: {epoch + 1} loss: {train_loss.result():.5f},'
+                      f'loss classification training: {train_loss_classi.result():.5f}, grading loss training: {train_loss_grading.result():.5f}'
                       f'acc classification: {float(train_accuracy_1.result()):.5f}, '
                       f'acc grading: {float(train_accuracy_1.result()):.5f}, '
                                           f'F-1 classification: {train_metrics[2]}, '
@@ -333,7 +348,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                       f'MSE avg: {np.mean(train_metrics[3]):.5f}')
 
         ###############
-        print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
+        """print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
               " train accuracy classification: {:.5f}, "
               "train accuracy grading: {:.5f}".format(epoch + 1,
                                                       max_epochs,
@@ -341,25 +356,41 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                                                       train_loss_classi.result(),
                                                       train_loss_grading.result(),
                                                       train_accuracy_1.result(),
-                                                      train_accuracy_2.result()))
+                                                      train_accuracy_2.result()))"""
+
+        print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {train_loss.result():.5f}, "
+              f"loss classification training: {train_loss_classi.result():.5f}, grading loss training: {train_loss_grading.result():.5f},"
+              f"acc classification: {float(train_accuracy_1.result()):.5f}, acc grading: {float(train_accuracy_1.result()):.5f}, "
+              f"f'F-1 classification: {train_metrics[2]}, F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, "
+              f"MSE avg: {np.mean(train_metrics[3]):.5f}")
 
         for x, valid_labels in valid_dataset:
             valid_images = x
-            valid_step(valid_images, valid_labels)
+            val_losses, val_metrics = valid_step(valid_images, valid_labels)
             with val_summary_writer.as_default():
-                tf.summary.scalar('loss', valid_loss.result(), step=epoch)
-                tf.summary.scalar('accuracy classification', valid_accuracy_1.result(), step=epoch)
-                tf.summary.scalar('accuracy gradding', valid_accuracy_2.result(), step=epoch)
+                tf.summary.scalar('val loss', valid_loss.result(), step=epoch)
+                tf.summary.scalar('val loss grading', val_loss_grading.result(), step=epoch)
+                tf.summary.scalar('val loss classification', val_loss_classi.result(), step=epoch)
+                tf.summary.scalar('val accuracy classification', valid_accuracy_1.result(), step=epoch)
+                tf.summary.scalar('val accuracy grading', valid_accuracy_2.result(), step=epoch)
 
-        print("Epoch: {}/{}, val loss: {:.5f}, val accuracy classification: {:.5f}, "
-              "val accuracy grading: {:.5f}".format(epoch + 1,
-                                                  max_epochs,
-                                                  valid_loss.result(),
-                                                  train_accuracy_1.result(),
-                                                  valid_accuracy_2.result()))
+
+        """print("Epoch: {}/{}, val loss: {:.5f}, val accuracy classification: {:.5f}, "
+                  "val accuracy grading: {:.5f}".format(epoch + 1,
+                                                      max_epochs,
+                                                      valid_loss.result(),
+                                                      train_accuracy_1.result(),
+                                                      valid_accuracy_2.result()))"""
+
+        print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {valid_loss.result():.5f}, "
+              f"loss classification training: {val_loss_classi.result():.5f}, grading loss training: {val_loss_grading.result():.5f},"
+              f"acc classification: {float(valid_accuracy_1.result()):.5f}, acc grading: {float(valid_accuracy_2.result()):.5f}, "
+              f"f'F-1 classification: {val_metrics[2]}, F-1 avg: {np.mean(val_metrics[2]):.5f}, MSE grading: {val_metrics[3]}, "
+              f"MSE avg: {np.mean(val_metrics[3]):.5f}")
 
         # checkpoint.save(epoch)
         # writer.flush()
+
 
         wait += 1
         if epoch == 0:
