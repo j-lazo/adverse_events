@@ -179,7 +179,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         return losses, metrics
 
-    @tf.function
+
+    def make_f1_score_array(input_tensor):
+        labels, predictions = input_tensor
+        return [f1_score(labels[:, i], np.argmax(predictions, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
+
+    #@tf.function
     def valid_step(images, labels):
         labels_1, labels_2 = labels
         predictions_1, predictions_2 = model(images, training=True)
@@ -187,14 +192,15 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         v_loss_2 = loss_fn_2(y_true=labels_2, y_pred=predictions_2)
         v_loss = tf.reduce_mean(v_loss_1) + tf.reduce_mean(v_loss_2)
         val_loss = valid_loss(v_loss)
-        predictions_acc_1 = tf.argmax(predictions_1, axis=1)
-        predictions_acc_2 = tf.argmax(predictions_2, axis=1)
-        val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_acc_1)
-        val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_acc_2)
+        #predictions_acc_1 = tf.argmax(predictions_1, axis=1)
+        #predictions_acc_2 = tf.argmax(predictions_2, axis=1)
+        val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_1)
+        val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_2)
         val_class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
+        #val_class_f1 = tf.map_fn(make_f1_score_array, (labels_1, predictions_1))
         val_grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
-        losses = [val_loss, v_loss_1, v_loss_2]
-        metrics = [val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse]
+        losses = tf.stack([val_loss, v_loss_1, v_loss_2])
+        metrics = tf.stack([val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse])
 
         return losses, metrics
 
@@ -324,7 +330,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         val_loss_grading.reset_states()
         step = 0
 
-        for x, train_labels in train_dataset:
+        """for x, train_labels in train_dataset:
             step += 1
             images = x
             train_loses, train_metrics = train_step(images, train_labels)
@@ -348,7 +354,7 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                       f'MSE avg: {np.mean(train_metrics[3]):.5f}')
 
         ###############
-        """print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
+        #print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
               " train accuracy classification: {:.5f}, "
               "train accuracy grading: {:.5f}".format(epoch + 1,
                                                       max_epochs,
@@ -356,17 +362,19 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                                                       train_loss_classi.result(),
                                                       train_loss_grading.result(),
                                                       train_accuracy_1.result(),
-                                                      train_accuracy_2.result()))"""
+                                                      train_accuracy_2.result()))
 
         print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {train_loss.result():.5f}, "
               f"loss classification training: {train_loss_classi.result():.5f}, grading loss training: {train_loss_grading.result():.5f},"
               f"acc classification: {float(train_accuracy_1.result()):.5f}, acc grading: {float(train_accuracy_1.result()):.5f}, "
               f"f'F-1 classification: {train_metrics[2]}, F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, "
               f"MSE avg: {np.mean(train_metrics[3]):.5f}")
+        """
 
         for x, valid_labels in valid_dataset:
             valid_images = x
             val_losses, val_metrics = valid_step(valid_images, valid_labels)
+
             with val_summary_writer.as_default():
                 tf.summary.scalar('val loss', valid_loss.result(), step=epoch)
                 tf.summary.scalar('val loss grading', val_loss_grading.result(), step=epoch)
@@ -381,12 +389,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                                                       valid_loss.result(),
                                                       train_accuracy_1.result(),
                                                       valid_accuracy_2.result()))"""
-
+        print(val_metrics)
         print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {valid_loss.result():.5f}, "
               f"loss classification training: {val_loss_classi.result():.5f}, grading loss training: {val_loss_grading.result():.5f},"
-              f"acc classification: {float(valid_accuracy_1.result()):.5f}, acc grading: {float(valid_accuracy_2.result()):.5f}, "
-              f"f'F-1 classification: {val_metrics[2]}, F-1 avg: {np.mean(val_metrics[2]):.5f}, MSE grading: {val_metrics[3]}, "
-              f"MSE avg: {np.mean(val_metrics[3]):.5f}")
+              f"acc classification: {float(valid_accuracy_1.result()):.5f}, acc grading: {float(valid_accuracy_2.result()):.5f}, ")
+              #f"f'F-1 classification: {val_metrics[2]}, F-1 avg: {np.mean(val_metrics[2]):.5f}, MSE grading: {val_metrics[3]}, "
+              #f"MSE avg: {np.mean(val_metrics[3]):.5f}")
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -593,12 +601,12 @@ def main(_argv):
 
     valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                               input_size=input_size_model, batch_size=batch_size,
-                                              multi_output_size=[2, len(grade_keys)],
+                                              multi_output_size=[4, len(grade_keys)],
                                               extract_label_by_keys=grade_keys)
 
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
                                              input_size=input_size_model, batch_size=len(physical_devices),
-                                             multi_output_size=[2, len(grade_keys)],
+                                             multi_output_size=[4, len(grade_keys)],
                                              image_paths=True,
                                              extract_label_by_keys=grade_keys)
 
