@@ -199,8 +199,10 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         val_class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
         #val_class_f1 = tf.map_fn(make_f1_score_array, (labels_1, predictions_1))
         val_grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
-        losses = tf.stack([val_loss, v_loss_1, v_loss_2])
-        metrics = tf.stack([val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse])
+        #losses = tf.stack([val_loss, v_loss_1, v_loss_2])
+        #metrics = tf.stack([val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse])
+        losses = [val_loss, v_loss_1, v_loss_2]
+        metrics = [val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse]
 
         return losses, metrics
 
