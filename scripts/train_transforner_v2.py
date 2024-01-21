@@ -586,7 +586,6 @@ def main(_argv):
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
     grade_keys = ['Overall', 'Bleeding grade', 'Mechanical injury grade', 'Thermal injury grade']
-    print(valid_dataset_dict)
     train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, selected_labels=selected_classes,
                                               input_size=input_size_model, batch_size=batch_size,
                                               multi_output_size=[4, len(grade_keys)],
