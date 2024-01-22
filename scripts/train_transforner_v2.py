@@ -167,7 +167,9 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
         #grade_f1 = [f1_score(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i], average='macro') for i in range(4)]
         grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
-        losses = [train_loss_val, t_loss_1, t_loss_2]
+        value_train_loss_class = train_loss_classi(t_loss_1)
+        value_train_loss_grading = train_loss_grading(t_loss_2)
+        losses = [train_loss_val, value_train_loss_class, t_loss_2]
         metrics = [train_accuracy_val_1, train_accuracy_val_2, class_f1, grade_mse]
 
         #print('f-1 class', class_f1)
@@ -180,9 +182,12 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         return losses, metrics
 
 
-    def make_f1_score_array(input_tensor):
-        labels, predictions = input_tensor
-        return [f1_score(labels[:, i], np.argmax(predictions, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
+    #@tf.function
+    def make_f1_score_array(labels, predictions):
+        f1_scores = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        for i in range(4):
+            f1_scores.write(f1_score(labels[:, i], np.argmax(predictions, axis=-1)[:, i], zero_division=0.0))
+        return f1_scores
 
     #@tf.function
     def valid_step(images, labels):
@@ -197,11 +202,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         val_accuracy_val_1 = valid_accuracy_1(labels_1, predictions_1)
         val_accuracy_val_2 = valid_accuracy_2(labels_2, predictions_2)
         val_class_f1 = [f1_score(labels_1[:, i], np.argmax(predictions_1, axis=-1)[:, i], zero_division=0.0) for i in range(4)]
-        #val_class_f1 = tf.map_fn(make_f1_score_array, (labels_1, predictions_1))
+        #val_class_f1 = make_f1_score_array(labels_1, predictions_1)
         val_grade_mse = [mean_squared_error(labels_2[:, i], np.argmax(predictions_2, axis=-1)[:, i]) for i in range(4)]
         #losses = tf.stack([val_loss, v_loss_1, v_loss_2])
         #metrics = tf.stack([val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse])
-        losses = [val_loss, v_loss_1, v_loss_2]
+        value_val_loss_classi = val_loss_classi(v_loss_1)
+        value_val_liss_grading = val_loss_grading(v_loss_2)
+        losses = [val_loss, value_val_loss_classi, value_val_liss_grading]
         metrics = [val_accuracy_val_1, val_accuracy_val_2, val_class_f1, val_grade_mse]
 
         return losses, metrics
@@ -224,15 +231,23 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
-    train_loss_classi = tf.keras.metrics.Mean(name='train_loss classi')
-    train_loss_grading = tf.keras.metrics.Mean(name='train_loss gradi')
+    train_loss_classi = tf.keras.metrics.Mean(name='train_loss_classi')
+    train_loss_grading = tf.keras.metrics.Mean(name='train_loss_grading')
     train_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_1')
     train_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy_2')
+
     valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-    val_loss_classi = tf.keras.metrics.Mean(name='valid_loss classi')
-    val_loss_grading = tf.keras.metrics.Mean(name='valid_loss gradi')
+    val_loss_classi = tf.keras.metrics.Mean(name='train_loss_classi')
+    val_loss_grading = tf.keras.metrics.Mean(name='train_loss_grading')
     valid_accuracy_1 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_1')
     valid_accuracy_2 = tf.keras.metrics.SparseCategoricalAccuracy(name='valid_accuracy_2')
+
+    f1_score_metric_train = tf.keras.metrics.Mean(name='train_f1')
+    mse_score_metric_train = tf.keras.metrics.Mean(name='train_mse')
+
+    f1_score_metric_val = tf.keras.metrics.Mean(name='val_f1')
+    mse_score_metric_val = tf.keras.metrics.Mean(name='val_mse')
+
     ep_cnt = tf.Variable(initial_value=0, trainable=False, dtype=tf.int64)
 
     # ID name for the folder and results
@@ -278,10 +293,22 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     train_classi_loss_list = list()
     train_grading_loss_list = list()
     val_loss_list = list()
+    val_classi_loss_list = list()
+    val_grading_loss_list = list()
     train_accuracy_list_1 = list()
     train_accuracy_list_2 = list()
     val_accuracy_list_1 = list()
     val_accuracy_list_2 = list()
+
+    f1_train_classi_list = list()
+    f1_train_avg_classi_list = list()
+    mse_train_grading_list = list()
+    mse_train_avg_grading_list = list()
+
+    f1_val_classi_list = list()
+    f1_val_avg_classi_list = list()
+    mse_val_grading_list = list()
+    mse_val_avg_grading_list = list()
 
     model_dir = os.path.join(results_directory, 'model_weights')
     os.mkdir(model_dir)
@@ -290,15 +317,23 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
     # headers pd Dataframe
     header_column = list()
     header_column.insert(0, 'epoch')
-    header_column.append('train loss')
-    header_column.append('val loss')
-    header_column.append('acc classification training')
-    header_column.append('acc grading training')
-    header_column.append('acc classification val')
-    header_column.append('acc phase step')
+    header_column.append('total train loss')
+    header_column.append('class train loss')
+    header_column.append('grade train loss')
+    header_column.append('total val loss')
+    header_column.append('class val loss')
+    header_column.append('grade val loss')
+    header_column.append('train acc classification')
+    header_column.append('train acc grading')
+    header_column.append('val acc class')
+    header_column.append('val acc grading')
+    header_column.append('train f-1 class')
+    header_column.append('train MSE grading')
+    header_column.append('val f-1 class')
+    header_column.append('val MSE grading')
 
-    template = ('ETA: {} - epoch: {} loss: {:.5f}  acc classification: {:.5f}, acc grading: {:.5f}, '
-                'F-1 classification: {}, F-1 avg: {:.5f}, MSE grading: {}, MSE avg: {.5.f}')
+    #template = ('ETA: {} - epoch: {} loss: {:.5f}  acc classification: {:.5f}, acc grading: {:.5f}, '
+    #            'F-1 classification: {}, F-1 avg: {:.5f}, MSE grading: {}, MSE avg: {.5.f}')
 
     for epoch in range(max_epochs):
     #    pb_i = Progbar(num_training_samples, stateful_metrics=metrics_names)
@@ -314,7 +349,14 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         train_accuracy_list_1.append(train_accuracy_1.result().numpy())
         train_accuracy_list_2.append(train_accuracy_2.result().numpy())
 
+        f1_train_classi_list.append(f1_score_metric_train.result().numpy())
+        mse_train_grading_list.append(mse_score_metric_train.result().numpy())
+        f1_val_classi_list.append(f1_score_metric_val.result().numpy())
+        mse_val_grading_list.append(mse_score_metric_val.result().numpy())
+
         val_loss_list.append(valid_loss.result().numpy())
+        val_classi_loss_list.append(val_loss_classi.result().numpy())
+        val_grading_loss_list.append(val_loss_grading.result().numpy())
         val_accuracy_list_1.append(valid_accuracy_1.result().numpy())
         val_accuracy_list_2.append(valid_accuracy_2.result().numpy())
 
@@ -324,15 +366,21 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         train_loss_grading.reset_states()
         train_accuracy_1.reset_states()
         train_accuracy_2.reset_states()
-        valid_loss.reset_states()
 
+        valid_loss.reset_states()
         valid_accuracy_1.reset_states()
         valid_accuracy_2.reset_states()
         val_loss_classi.reset_states()
         val_loss_grading.reset_states()
-        step = 0
 
-        """for x, train_labels in train_dataset:
+        f1_score_metric_train.reset_states()
+        f1_score_metric_val.reset_states()
+        mse_score_metric_train.reset_states()
+        mse_score_metric_val.reset_states()
+
+        step = 0
+        
+        for x, train_labels in train_dataset:
             step += 1
             images = x
             train_loses, train_metrics = train_step(images, train_labels)
@@ -357,21 +405,21 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
         ###############
         #print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
-              " train accuracy classification: {:.5f}, "
-              "train accuracy grading: {:.5f}".format(epoch + 1,
-                                                      max_epochs,
-                                                      train_loss.result(),
-                                                      train_loss_classi.result(),
-                                                      train_loss_grading.result(),
-                                                      train_accuracy_1.result(),
-                                                      train_accuracy_2.result()))
+        #      " train accuracy classification: {:.5f}, "
+        #      "train accuracy grading: {:.5f}".format(epoch + 1,
+        #                                              max_epochs,
+        #                                              train_loss.result(),
+        #                                              train_loss_classi.result(),
+        #                                              train_loss_grading.result(),
+        #                                              train_accuracy_1.result(),
+        #                                              train_accuracy_2.result()))
 
-        print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {train_loss.result():.5f}, "
+        print(f"Epoch {epoch + 1}/{max_epochs + 1}. Total train loss {train_loss.result():.5f}, "
               f"loss classification training: {train_loss_classi.result():.5f}, grading loss training: {train_loss_grading.result():.5f},"
               f"acc classification: {float(train_accuracy_1.result()):.5f}, acc grading: {float(train_accuracy_1.result()):.5f}, "
               f"f'F-1 classification: {train_metrics[2]}, F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, "
               f"MSE avg: {np.mean(train_metrics[3]):.5f}")
-        """
+        
 
         for x, valid_labels in valid_dataset:
             valid_images = x
@@ -384,19 +432,11 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                 tf.summary.scalar('val accuracy classification', valid_accuracy_1.result(), step=epoch)
                 tf.summary.scalar('val accuracy grading', valid_accuracy_2.result(), step=epoch)
 
-
-        """print("Epoch: {}/{}, val loss: {:.5f}, val accuracy classification: {:.5f}, "
-                  "val accuracy grading: {:.5f}".format(epoch + 1,
-                                                      max_epochs,
-                                                      valid_loss.result(),
-                                                      train_accuracy_1.result(),
-                                                      valid_accuracy_2.result()))"""
-        print(val_metrics)
-        print(f"Epoch{epoch + 1}/{max_epochs + 1}. Total train loss {valid_loss.result():.5f}, "
+        print(f"Epoch {epoch + 1}/{max_epochs + 1}. Total validation loss {valid_loss.result():.5f}, "
               f"loss classification training: {val_loss_classi.result():.5f}, grading loss training: {val_loss_grading.result():.5f},"
-              f"acc classification: {float(valid_accuracy_1.result()):.5f}, acc grading: {float(valid_accuracy_2.result()):.5f}, ")
-              #f"f'F-1 classification: {val_metrics[2]}, F-1 avg: {np.mean(val_metrics[2]):.5f}, MSE grading: {val_metrics[3]}, "
-              #f"MSE avg: {np.mean(val_metrics[3]):.5f}")
+              f"acc classification: {float(valid_accuracy_1.result()):.5f}, acc grading: {float(valid_accuracy_2.result()):.5f}, "
+              f"f'F-1 classification: {val_metrics[2]}, F-1 avg: {np.mean(val_metrics[2]):.5f}, MSE grading: {val_metrics[3]}, "
+              f"MSE avg: {np.mean(val_metrics[3]):.5f}")
 
         # checkpoint.save(epoch)
         # writer.flush()
@@ -414,9 +454,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
             break
 
         if epoch % 5 == 0:
-            df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+            df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, train_classi_loss_list, train_grading_loss_list,
+                                       val_loss_list, val_classi_loss_list, val_grading_loss_list,
                                        train_accuracy_list_1, train_accuracy_list_2,
-                                       val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+                                       val_accuracy_list_1, val_accuracy_list_2,
+                                       f1_train_classi_list, mse_train_grading_list,
+                                       f1_val_classi_list, mse_val_grading_list
+                                       )), columns=header_column)
 
             path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
             df.to_csv(path_history_csv_file, index=False)
@@ -427,17 +471,13 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
 
     # save history
 
-    print(len(epoch_counter), epoch_counter)
-    print(len(train_loss_list), train_loss_list)
-    print(len(val_loss_list), val_loss_list)
-    print(len(train_accuracy_list_1), train_accuracy_list_1)
-    print(len(train_accuracy_list_2), train_accuracy_list_2)
-    print(len(val_accuracy_list_1), val_accuracy_list_1)
-    print(len(val_accuracy_list_2), val_accuracy_list_2)
-
-    df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, val_loss_list,
+    df = pd.DataFrame(list(zip(epoch_counter, train_loss_list, train_classi_loss_list, train_grading_loss_list,
+                               val_loss_list, val_classi_loss_list, val_grading_loss_list,
                                train_accuracy_list_1, train_accuracy_list_2,
-                               val_accuracy_list_1, val_accuracy_list_2)), columns=header_column)
+                               val_accuracy_list_1, val_accuracy_list_2,
+                               f1_train_classi_list, mse_train_grading_list,
+                               f1_val_classi_list, mse_val_grading_list
+                               )), columns=header_column)
 
     path_history_csv_file = os.path.join(results_directory, 'training_history.csv')
     df.to_csv(path_history_csv_file, index=False)
@@ -449,51 +489,130 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         print(f'Making predictions on test dataset')
         # 2Do load saved model
 
-        list_predictions_phases = list()
-        list_predictions_steps = list()
         list_images = list()
-        list_labels_phase = list()
-        list_labels_step = list()
+
+        list_predictions_class_1 = list()
+        list_predictions_class_2 = list()
+        list_predictions_class_3 = list()
+        list_predictions_class_4 = list()
+        list_predictions_grade_1 = list()
+        list_predictions_grade_2 = list()
+        list_predictions_grade_3 = list()
+        list_predictions_grade_4 = list()
+
+        list_labels_class_1 = list()
+        list_labels_class_2 = list()
+        list_labels_class_3 = list()
+        list_labels_class_4 = list()
+        list_labels_grade_1 = list()
+        list_labels_grade_2 = list()
+        list_labels_grade_3 = list()
+        list_labels_grade_4 = list()
+
         for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
             image_labels = data_batch[0]
             path_img = data_batch[1]
             image, labels = image_labels
+            labels_classi, labels_grading = labels
+            pred_classi, pred_grading = prediction_step(image)
 
-            pred_phase, pred_step = prediction_step(image)
-            prediction_phase = list(pred_phase.numpy()[0]).index(max(list(pred_phase.numpy()[0])))
-            prediction_steps = list(pred_step.numpy()[0]).index(max(list(pred_step.numpy()[0])))
+            pred_class_1, pred_class_2, pred_class_3, pred_class_4 = pred_classi.numpy()[0]
+            prediction_classi_1 = list(pred_class_1).index(max(list(pred_class_1)))
+            prediction_classi_2 = list(pred_class_2).index(max(list(pred_class_2)))
+            prediction_classi_3 = list(pred_class_3).index(max(list(pred_class_3)))
+            prediction_classi_4 = list(pred_class_4).index(max(list(pred_class_4)))
+
+            pred_grade_1, pred_grade_2, pred_grade_3, pred_grade_4 = pred_grading.numpy()[0]
+            predictions_grade_1 = list(pred_grade_1).index(max(list(pred_grade_1)))
+            predictions_grade_2 = list(pred_grade_2).index(max(list(pred_grade_2)))
+            predictions_grade_3 = list(pred_grade_3).index(max(list(pred_grade_3)))
+            predictions_grade_4 = list(pred_grade_4).index(max(list(pred_grade_4)))
 
             list_images.append(path_img.numpy())
-            list_predictions_phases.append(prediction_phase)
-            list_predictions_steps.append(prediction_steps)
 
-            label_phase, label_step = labels
-            gt_phase = list(label_phase.numpy()[0]).index(max(list(label_phase.numpy()[0])))
-            gt_step = list(label_step.numpy()[0]).index(max(list(label_step.numpy()[0])))
-            list_labels_phase.append(gt_phase)
-            list_labels_step.append(gt_step)
+            list_predictions_class_1.append(prediction_classi_1)
+            list_predictions_class_2.append(prediction_classi_2)
+            list_predictions_class_3.append(prediction_classi_3)
+            list_predictions_class_4.append(prediction_classi_4)
+            list_labels_class_1.append(labels_classi.numpy()[0][0])
+            list_labels_class_2.append(labels_classi.numpy()[0][1])
+            list_labels_class_3.append(labels_classi.numpy()[0][2])
+            list_labels_class_4.append(labels_classi.numpy()[0][3])
+
+            list_predictions_grade_1.append(predictions_grade_1)
+            list_predictions_grade_2.append(predictions_grade_2)
+            list_predictions_grade_3.append(predictions_grade_3)
+            list_predictions_grade_4.append(predictions_grade_4)
+            list_labels_grade_1.append(labels_grading.numpy()[0][0])
+            list_labels_grade_2.append(labels_grading.numpy()[0][1])
+            list_labels_grade_3.append(labels_grading.numpy()[0][2])
+            list_labels_grade_4.append(labels_grading.numpy()[0][3])
 
         header_column = list()
         header_column.insert(0, 'img name')
-        header_column.append('label class')
-        header_column.append('predicted class')
-        header_column.append('label grade')
-        header_column.append('predicted grade')
+        header_column.append('predicted overall')
+        header_column.append('predicted bleeding')
+        header_column.append('predicted MI')
+        header_column.append('predicted TI')
 
-        df = pd.DataFrame(list(zip(list_images, list_labels_phase, list_predictions_phases,
-                                   list_labels_step, list_predictions_steps)), columns=header_column)
+        header_column.append('label overall')
+        header_column.append('label bleeding')
+        header_column.append('label MI')
+        header_column.append('label TI')
+
+        header_column.append('predicted grade overall')
+        header_column.append('predicted grade bleeding')
+        header_column.append('predicted grade MI')
+        header_column.append('predicted grade TI')
+
+        header_column.append('label grade overall')
+        header_column.append('label grade bleeding')
+        header_column.append('label grade MI')
+        header_column.append('label grade TI')
+
+        df = pd.DataFrame(list(zip(list_images, list_predictions_class_1, list_predictions_class_2,
+                                   list_predictions_class_3, list_predictions_class_4,
+                                   list_labels_class_1, list_labels_class_2,
+                                   list_labels_class_3, list_labels_class_4,
+                                   list_predictions_grade_1, list_predictions_grade_2,
+                                   list_predictions_grade_3, list_predictions_grade_4,
+                                   list_labels_grade_1, list_labels_grade_2,
+                                   list_labels_grade_3, list_labels_grade_4)), columns=header_column)
 
         path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
         df.to_csv(path_results_csv_file, index=False)
 
         print(f'csv file with results saved: {path_results_csv_file}')
 
-        dir_conf_matrix_phase = os.path.join(results_directory, 'confusion_matrix_class.png')
-        daa.compute_confusion_matrix(list_labels_phase, list_predictions_phases, plot_figure=False,
-                                 dir_save_fig=dir_conf_matrix_phase)
-        dir_conf_matrix_step = os.path.join(results_directory, 'confusion_matrix_grade.png')
-        daa.compute_confusion_matrix(list_labels_step, list_predictions_steps, plot_figure=False,
-                                 dir_save_fig=dir_conf_matrix_step)
+        dir_conf_matrix_grade_nothing = os.path.join(results_directory, 'confusion_matrix_grade_nothing.png')
+        daa.compute_confusion_matrix(list_labels_grade_1, list_predictions_grade_1, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_grade_nothing)
+        dir_conf_matrix_grade_bleeding = os.path.join(results_directory, 'confusion_matrix_grade_bleeding.png')
+        daa.compute_confusion_matrix(list_labels_grade_2, list_predictions_grade_2, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_grade_bleeding)
+        dir_conf_matrix_grade_mechanical_injury = os.path.join(results_directory, 'confusion_matrix_grade_mechanical_injury.png')
+        daa.compute_confusion_matrix(list_labels_grade_3, list_predictions_grade_3, plot_figure=False,
+                                     dir_save_fig=dir_conf_matrix_grade_mechanical_injury)
+        dir_conf_matrix_grade_thermal_injury = os.path.join(results_directory, 'confusion_matrix_grade_thermal_injury.png')
+        daa.compute_confusion_matrix(list_labels_grade_4, list_predictions_grade_4, plot_figure=False,
+                                     dir_save_fig=dir_conf_matrix_grade_thermal_injury)
+
+        dir_conf_matrix_class_overall = os.path.join(results_directory, 'confusion_matrix_class_overall.png')
+        daa.compute_confusion_matrix(list_labels_class_1, list_predictions_class_1, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_class_overall)
+        dir_conf_matrix_class_bleeding = os.path.join(results_directory, 'confusion_matrix_class_bleeding.png')
+        daa.compute_confusion_matrix(list_labels_class_2, list_predictions_class_2, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_class_bleeding)
+        dir_conf_matrix_class_mechanical_injury = os.path.join(results_directory, 'confusion_matrix_class_mechanical_injury.png')
+        daa.compute_confusion_matrix(list_labels_class_3, list_predictions_class_3, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_class_mechanical_injury)
+        dir_conf_matrix_class_thermal_injury = os.path.join(results_directory, 'confusion_matrix_class_thermal_injury.png')
+        daa.compute_confusion_matrix(list_labels_class_4, list_predictions_class_4, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix_class_thermal_injury)
+
+
+
+
 
 def main(_argv):
     institution_folders_frames = {'stras': 'stras_by70', 'bern': 'bern_by70'}
