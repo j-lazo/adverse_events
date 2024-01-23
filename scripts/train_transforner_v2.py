@@ -379,17 +379,25 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
         mse_score_metric_val.reset_states()
 
         step = 0
-        
-        for x, train_labels in train_dataset:
+        metrics_names_train = ['train epoch', 'total loss', 'loss classification', 'loss grading', 'acc classification',
+                         'acc grading', 'F-1 avg', 'MSE avg']
+
+        for i, (x, train_labels) in enumerate(train_dataset):
+            progbar_train = tf.keras.utils.Progbar(len(train_dataset), stateful_metrics=metrics_names_train)
             step += 1
             images = x
             train_loses, train_metrics = train_step(images, train_labels)
+            values = [('train epoch', int(epoch + 1)), ('total loss', train_loss.result()),
+                      ('loss classification', train_loss_classi.result()), ('loss grading', train_loss_grading.result()),
+                      ('acc classification', float(train_accuracy_1.result())), ('acc grading', float(train_accuracy_1.result())),
+                      ('F-1 avg', np.mean(train_metrics[2])), ('MSE avg', np.mean(train_metrics[3]))]
             with train_summary_writer.as_default():
                 tf.summary.scalar('loss', train_loss.result(), step=epoch)
                 tf.summary.scalar('loss classification', train_loss_classi.result(), step=epoch)
                 tf.summary.scalar('loss grading', train_loss_grading.result(), step=epoch)
                 tf.summary.scalar('accuracy classification', train_accuracy_1.result(), step=epoch)
                 tf.summary.scalar('accuracy grading', train_accuracy_2.result(), step=epoch)
+            progbar_train.update(i, values=values)
             if verbose:
                 #print(template.format(round((time.time() - t) / 60, 2), epoch + 1, train_loss.result(),
                 #                      float(train_accuracy_1.result()), float(train_accuracy_1.result()),
@@ -403,28 +411,28 @@ def custom_training(model_name, train_dataset, valid_dataset, max_epochs, fold, 
                       f'F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, '
                       f'MSE avg: {np.mean(train_metrics[3]):.5f}')
 
-        ###############
-        #print("Epoch: {}/{}, total train loss: {:.5f}, classification train loss: {:.5f}, grading training loss: {:.5f}"
-        #      " train accuracy classification: {:.5f}, "
-        #      "train accuracy grading: {:.5f}".format(epoch + 1,
-        #                                              max_epochs,
-        #                                              train_loss.result(),
-        #                                              train_loss_classi.result(),
-        #                                              train_loss_grading.result(),
-        #                                              train_accuracy_1.result(),
-        #                                              train_accuracy_2.result()))
-
         print(f"Epoch {epoch + 1}/{max_epochs + 1}. Total train loss {train_loss.result():.5f}, "
               f"loss classification training: {train_loss_classi.result():.5f}, grading loss training: {train_loss_grading.result():.5f},"
               f"acc classification: {float(train_accuracy_1.result()):.5f}, acc grading: {float(train_accuracy_1.result()):.5f}, "
               f"f'F-1 classification: {train_metrics[2]}, F-1 avg: {np.mean(train_metrics[2]):.5f}, MSE grading: {train_metrics[3]}, "
               f"MSE avg: {np.mean(train_metrics[3]):.5f}")
-        
 
-        for x, valid_labels in valid_dataset:
+        metrics_names_val = ['val epoch', 'total loss', 'loss classification', 'loss grading', 'acc classification',
+                               'acc grading', 'F-1 avg', 'MSE avg']
+
+        for j, (x, valid_labels) in enumerate(valid_dataset):
             valid_images = x
             val_losses, val_metrics = valid_step(valid_images, valid_labels)
+            progbar_val = tf.keras.utils.Progbar(len(valid_dataset), stateful_metrics=metrics_names_val)
 
+            values = [('val epoch', int(epoch + 1)), ('total loss', valid_loss.result()),
+                      ('loss classification', val_loss_classi.result()),
+                      ('loss grading', val_loss_grading.result()),
+                      ('acc classification', float(valid_accuracy_1.result())),
+                      ('acc grading', float(valid_accuracy_2.result())),
+                      ('F-1 avg', np.mean(val_metrics[2])), ('MSE avg', np.mean(val_metrics[3]))]
+
+            progbar_val.add(j, values=values)
             with val_summary_writer.as_default():
                 tf.summary.scalar('val loss', valid_loss.result(), step=epoch)
                 tf.summary.scalar('val loss grading', val_loss_grading.result(), step=epoch)
@@ -620,7 +628,7 @@ def main(_argv):
     physical_devices = tf.config.list_physical_devices('GPU')
     print('Build with Cuda:', tf.test.is_built_with_cuda())
     print("Num GPUs:", len(physical_devices))
-
+    ratio = 1
     path_dataset = FLAGS.path_dataset
     path_annotations_dataset = FLAGS.path_annotations
     data_center = FLAGS.data_center
@@ -673,9 +681,9 @@ def main(_argv):
             val_annotations_file_path = os.path.join(path_val_annotations, val_annotations_file_name)
             test_annotations_file_path = os.path.join(path_test_annotations, test_annotations_file_name)
 
-            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=1)
-            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=1)
-            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path, output_type=output_type, ratio=1)
+            temp_train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=ratio)
+            temp_valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=ratio)
+            temp_test_dataset_dict = dam.load_dataset_from_directory(path_frames, test_annotations_file_path, output_type=output_type, ratio=ratio)
 
             train_dataset_dict = {**train_dataset_dict, **temp_train_dataset_dict}
             valid_dataset_dict = {**valid_dataset_dict, **temp_valid_dataset_dict}
@@ -708,10 +716,10 @@ def main(_argv):
         test_annotations_file_path_1 = os.path.join(path_test_annotations_1, test_annotations_file_name_1)
         test_annotations_file_path_2 = os.path.join(path_test_annotations_2, test_annotations_file_name_2)
 
-        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=1)
-        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=1)
-        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type, ratio=1)
-        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type, ratio=1)
+        train_dataset_dict = dam.load_dataset_from_directory(path_frames, train_annotations_file_path, output_type=output_type, ratio=ratio)
+        valid_dataset_dict = dam.load_dataset_from_directory(path_frames, val_annotations_file_path, output_type=output_type, ratio=ratio)
+        test_dataset_dict_1 = dam.load_dataset_from_directory(path_frames, test_annotations_file_path_1, output_type=output_type, ratio=ratio)
+        test_dataset_dict_2 = dam.load_dataset_from_directory(path_cross_center_frames, test_annotations_file_path_2, output_type=output_type, ratio=ratio)
         test_dataset_dict = {**test_dataset_dict_1, **test_dataset_dict_2}
 
     grade_keys = ['Overall', 'Bleeding grade', 'Mechanical injury grade', 'Thermal injury grade']
@@ -726,7 +734,7 @@ def main(_argv):
                                               extract_label_by_keys=grade_keys)
 
     test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, selected_labels=selected_classes,
-                                             input_size=input_size_model, batch_size=len(physical_devices),
+                                             input_size=input_size_model, batch_size=max([1, len(physical_devices)]),
                                              multi_output_size=[4, len(grade_keys)],
                                              image_paths=True,
                                              extract_label_by_keys=grade_keys)
