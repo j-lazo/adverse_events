@@ -530,7 +530,6 @@ def create_model(n_frames=10):
     distance = Lambda(euclidean_distance)([featsA, featsB])
     final_model = tf.keras.Model(inputs=[imgA, imgB, inputs_position], outputs=distance)
     final_model.compile(loss=contrastive_loss, optimizer=tf.keras.optimizers.Adam(1e-5))
-
     return final_model, featureExtractor1
 
 
@@ -556,7 +555,7 @@ class Dataset_v1(torch.utils.data.Dataset):
             img_path = self.dictionary_labels.get(img_id).get('Path_img')
             # img_label = np.asarray([get_labels_class(self.dictionary_labels[img_id]),
             #                        get_labels_grade(self.dictionary_labels[img_id])])
-            img_label = np.asarray(get_labels_grade(self.dictionary_labels[img_id]))
+            img_label = np.asarray(get_labels_class(self.dictionary_labels[img_id]))
             self.unique_labels.append(str(img_label))
             if str(img_label) not in self.strLabel_to_nparr:
                 self.strLabel_to_nparr[str(img_label)] = img_label
@@ -668,8 +667,8 @@ def main(_argv):
     training_generator = torch.utils.data.DataLoader(d1, **params)
     valid_generator = torch.utils.data.DataLoader(d2, **params_val)
 
-    model_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
-    featureExtractors_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
+    model_dict = {'class_model': None}
+    featureExtractors_dict = {'class_model': None}
 
     for k in model_dict:
         f_model, feature_extractor = create_model(n_frames)
@@ -677,7 +676,6 @@ def main(_argv):
         featureExtractors_dict[k] = feature_extractor
 
     gg = 0
-
     for j in range(30):
         for path, label, label_op, img_np in training_generator:
             gc.collect()
