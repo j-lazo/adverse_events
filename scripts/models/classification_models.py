@@ -79,7 +79,7 @@ def load_pretrained_backbones_from_local(name_model, weights='imagenet', include
 
     elif name_model == 'mobilenet':
         weights_dir = base_dir_weights + 'mobilenet/mobilenet_1_0_224_tf_no_top.h5'
-        base_model = applications.mobilenet.MobileNet(include_top=include_top, weights=weights_dir)
+        base_model = applications.mobilenet.MobileNet(include_top=include_top, weights=weights_dir, pooling='avg')
         base_model.trainable = trainable
 
     elif name_model == 'densenet121':

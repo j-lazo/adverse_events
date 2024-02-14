@@ -20,6 +20,8 @@ from tensorflow.keras.layers import *
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Lambda
 import datetime
+from models import classification_models as cm
+
 
 input_sizes_models = {'resnet50': (224, 224), 'mobilenet': (224, 224),
                       'densenet121': (224, 224)}
@@ -56,7 +58,8 @@ def build_pretrained_model(name_model, trainable=False):
     input_image = tf.keras.Input(shape=(128, 128, 3), name="image")
     x = tf.image.resize(input_image, input_sizes_models[name_model], method='area')
     x = get_preprocess_input_backbone(name_model, x)
-    base_model = load_pretrained_backbones(name_model)
+    #base_model = load_pretrained_backbones(name_model)
+    base_model = cm.load_pretrained_backbones_from_local(name_model)
     if trainable is False:
         for layer in base_model.layers:
             layer.trainable = False
@@ -343,6 +346,64 @@ def load_dataset_from_directory(path_frames, path_annotations, output_type='bina
     return output_dict
 
 
+def transformer(n_frames=10):
+    proj_dim = 128
+    transformer_layers = 2
+    projection_dim = proj_dim
+    num_heads = 4
+    transformer_units = [
+        projection_dim * 2,
+        projection_dim,
+    ]  # Size of the transformer layers
+    mlp_head_units = [
+        256,
+        128,
+    ]
+    input_transformer_shape = (n_frames,1024)
+    inputs_image = Input(shape=input_transformer_shape)
+    inputs_position = Input(shape = (input_transformer_shape[0]))
+
+    s1 = np.sqrt(input_transformer_shape)[0].astype(np.int16)
+    image_projection = Dense(projection_dim)(inputs_image)
+    position_projection = Embedding(67,projection_dim)(inputs_position)
+    encoded_patches = Add()([image_projection, position_projection])
+    for _ in range(transformer_layers):
+        # Layer normalization 1.
+        # x1 = encoded_patches
+        x1 = LayerNormalization(epsilon=1e-6)(encoded_patches)
+        # Create a multi-head attention layer.
+        attention_output = MultiHeadAttention(
+            num_heads=num_heads, key_dim=projection_dim, dropout=0.1
+        )(x1, x1)
+        # Skip connection 1.
+        x2 = Add()([attention_output, encoded_patches])
+        # Layer normalization 2.
+        # x3 = x2
+        x3 = LayerNormalization(epsilon=1e-6)(x2)
+        # MLP.
+        x3 = mlp(x3, hidden_units=transformer_units, dropout_rate=0.1)
+        # Skip connection 2.
+        encoded_patches = Add()([x3, x2])
+
+    op = GlobalAveragePooling1D()(encoded_patches)
+    op = Dense(96, activation = 'tanh')(op)
+    transformer1 = tf.keras.Model((inputs_image, inputs_position), op)
+
+    return transformer1
+
+
+def make_featureExtractor(n_frames=10):
+    input_transformer_shape = (n_frames, 1024)
+    transformer1 = transformer(n_frames)
+    inputs_image = Input(shape=(n_frames, 128, 128, 3))
+    inputs_position = Input(shape = (input_transformer_shape[0]))
+    #m_met.trainable = False
+    #conv_2d_layer = m_met
+    conv_2d_layer = build_pretrained_model('mobilenet')
+    outputs = tf.keras.layers.TimeDistributed(conv_2d_layer)(inputs_image)
+    emb = transformer1((outputs, inputs_position))
+    return tf.keras.Model((inputs_image, inputs_position), emb)
+
 def make_pairs(images, labels):
 	# initialize two empty lists to hold the (image, image) pairs and
 	# labels to indicate if a pair is positive or negative
@@ -381,6 +442,96 @@ def make_pairs(images, labels):
 		pairLabels.append([0])
 	# return a 2-tuple of our image pairs and labels
 	return (np.array(pairImages), np.array(pairLabels))
+
+
+def train(i, f_m, label_op, img_np, n_frames=10):
+    input_transformer_shape = (n_frames, 1024)
+    l1 = label_op[:,i]
+    pI, pL = make_pairs(img_np, l1)
+    positions = np.asarray([[j for j in range(input_transformer_shape[0])] for _ in range(len(pI))])
+    i1 = pI[:,0,:,:,:]
+    i2 = pI[:,1,:,:,:]
+    for _ in range(5):
+        f_m.fit((i1, i2, positions), pL, verbose=1, batch_size=32)
+        gc.collect()
+
+
+def create_val_plots(valid_generator, featureExtractors_dict, gg, dataset, max_iter=20, path_results=os.getcwd(), n_frames=10):
+    input_transformer_shape = (n_frames, 1024)
+
+    for idxx, k in enumerate(featureExtractors_dict.keys()):
+        featureExtractor = featureExtractors_dict.get(k)
+        e = []
+        l = []
+        j = 0
+        for path, label, label_op, img_np in valid_generator:
+            gc.collect()
+            path, label, label_op, img_np = path, label, label_op.numpy(), img_np.numpy()
+            positions = np.asarray([[i for i in range(input_transformer_shape[0])] for _ in range(len(img_np))])
+            emb = featureExtractor.predict((img_np, positions), batch_size=16, verbose=1)
+            j += 1
+            e.append(emb)
+            l.append(label_op)
+            if j >= max_iter:
+                break
+
+        e = np.asarray(e)
+        l = np.asarray(l)
+        e = np.reshape(e, (-1, 96))
+        l = np.reshape(l, (-1, 3))
+        label1 = []
+        uq = {}
+        h = 0
+        for i in l:
+            # i = i[0]
+            i = i[idxx]
+            if str(i) not in uq:
+                uq[str(i)] = h
+                h += 1
+            label1.append(uq.get(str(i)))
+
+        emb = e
+        p = len(emb) // len(uq)
+        # p = 32
+        if p >= len(label1):
+            p = 32
+        model = TSNE(n_components=2, random_state=0, perplexity=p)
+        op_emb = model.fit_transform(emb)
+        # imhandle = plt.scatter(op_emb[:,0], op_emb[:,1], s = 3, c=label1, cmap = 'jet')
+        plt.figure(idxx + 3, figsize=(12, 8))
+
+        fig, ax = plt.subplots()
+        plt.title(f'TSNE {k} iter: {str(gg)}')
+        scatter = ax.scatter(op_emb[:, 0], op_emb[:, 1], s=3, c=label1, cmap='jet')
+        # produce a legend with the unique colors from the scatter
+        legend1 = ax.legend(*scatter.legend_elements(),
+                            loc="best", title="Grades")
+        ax.add_artist(legend1)
+        # produce a legend with a cross-section of sizes from the scatter
+        handles, labels = scatter.legend_elements(prop="sizes", alpha=0.6)
+        path_plot_val = os.path.join(path_results, f'tsne_plot_{k}_{dataset}.png')
+        plt.savefig(path_plot_val)
+        plt.clf()
+        plt.close()
+
+
+def create_model(n_frames=10):
+    input_transformer_shape = (n_frames, 1024)
+    imgA = tf.keras.Input(shape=(n_frames, 128, 128, 3))
+    imgB = tf.keras.Input(shape=(n_frames, 128, 128, 3))
+    inputs_position = tf.keras.Input(shape=(input_transformer_shape[0]))
+
+    featureExtractor1 = make_featureExtractor(n_frames)
+    # featureExtractor = build_siamese_model((10,64,64,3))
+    featsA = featureExtractor1((imgA, inputs_position))
+    featsB = featureExtractor1((imgB, inputs_position))
+
+    # finally, construct the siamese network
+    distance = Lambda(euclidean_distance)([featsA, featsB])
+    final_model = tf.keras.Model(inputs=[imgA, imgB, inputs_position], outputs=distance)
+    final_model.compile(loss=contrastive_loss, optimizer=tf.keras.optimizers.Adam(1e-5))
+
+    return final_model, featureExtractor1
 
 
 class Dataset_v1(torch.utils.data.Dataset):
@@ -457,12 +608,13 @@ class Dataset_v1(torch.utils.data.Dataset):
         # img_resized = img_temp.resize((self.size, self.size))
         # img_np = np.asarray(img_resized)/255.0
         # imf_final = img_np
-        y = np.random.uniform(0.4, 2.0)
-        imf_final = np.asarray(op_img) * y
-        # imf_final = np.asarray(op_img)
-        imf_final = np.ascontiguousarray(np.rot90(imf_final, np.random.randint(0, 4), axes=(1, 2)))
-        # introduce augmentations
-        # img_final = self.augment(img_np)
+        if self.training is True:
+            # Augmentations
+            y = np.random.uniform(0.4, 2.0)
+            imf_final = np.asarray(op_img) * y
+            imf_final = np.ascontiguousarray(np.rot90(imf_final, np.random.randint(0, 4), axes=(1, 2)))
+        else:
+            imf_final = np.asarray(op_img)
 
         return path, label, label_op, imf_final  # , img_final
 
@@ -497,6 +649,7 @@ def main(_argv):
     experiment_name = ''.join(['contrastive_exp_', backbone_net, '_', training_date_time.strftime("%d_%m_%Y_%H_%M")])
     path_results = os.path.join(os.getcwd(), 'results', experiment_name)
     os.mkdir(path_results)
+    n_frames = FLAGS.num_frames_input
     print(f'path experiment results {path_results}')
 
     path_frames = os.path.join(path_dataset, institution_folders_frames[center], 'frames')
@@ -504,9 +657,9 @@ def main(_argv):
     path_pickle_val = FLAGS.path_pickle_val
     dataset_dict_val = load_dataset_from_directory(path_frames, path_pickle_val, output_type='class_and_grade')
 
-    d2 = Dataset_v1(dictionary_labels=dataset_dict_val, rotate90=True, random_flip=True, tubelet_size=10, size=128)
-    d1 = Dataset_v1(dictionary_labels=dataset_dict, rotate90=True, random_flip=True, tubelet_size=10, size=128)
-
+    d2 = Dataset_v1(dictionary_labels=dataset_dict_val, rotate90=True, random_flip=True, tubelet_size=n_frames, size=128)
+    d1 = Dataset_v1(dictionary_labels=dataset_dict, rotate90=True, random_flip=True, tubelet_size=n_frames, size=128, training=True)
+    input_transformer_shape = (n_frames, 1024)
     params = {'batch_size': 128,
               'num_workers': 0}
 
@@ -515,72 +668,13 @@ def main(_argv):
     training_generator = torch.utils.data.DataLoader(d1, **params)
     valid_generator = torch.utils.data.DataLoader(d2, **params_val)
 
-    proj_dim = 128
-    transformer_layers = 2
-    projection_dim = proj_dim
-    num_heads = 4
-    transformer_units = [
-        projection_dim * 2,
-        projection_dim,
-    ]  # Size of the transformer layers
-    mlp_head_units = [
-        256,
-        128,
-    ]
-    input_transformer_shape = (10, 1024)
-    inputs_image = Input(shape=input_transformer_shape)
-    inputs_position = Input(shape=(input_transformer_shape[0]))
+    model_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
+    featureExtractors_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
 
-    s1 = np.sqrt(input_transformer_shape)[0].astype(np.int16)
-    image_projection = Dense(projection_dim)(inputs_image)
-    position_projection = Embedding(67, projection_dim)(inputs_position)
-    encoded_patches = Add()([image_projection, position_projection])
-    for _ in range(transformer_layers):
-        # Layer normalization 1.
-        # x1 = encoded_patches
-        x1 = LayerNormalization(epsilon=1e-6)(encoded_patches)
-        # Create a multi-head attention layer.
-        attention_output = MultiHeadAttention(
-            num_heads=num_heads, key_dim=projection_dim, dropout=0.1
-        )(x1, x1)
-        # Skip connection 1.
-        x2 = Add()([attention_output, encoded_patches])
-        # Layer normalization 2.
-        # x3 = x2
-        x3 = LayerNormalization(epsilon=1e-6)(x2)
-        # MLP.
-        x3 = mlp(x3, hidden_units=transformer_units, dropout_rate=0.1)
-        # Skip connection 2.
-        encoded_patches = Add()([x3, x2])
-
-    op = GlobalAveragePooling1D()(encoded_patches)
-    op = Dense(96, activation='tanh')(op)
-    transformer1 = tf.keras.Model((inputs_image, inputs_position), op)
-
-    inputs_image = Input(shape=(10, 128, 128, 3))
-    inputs_position = Input(shape=(input_transformer_shape[0]))
-    # m_met.trainable = False
-    # conv_2d_layer = m_met
-    conv_2d_layer = build_pretrained_model(backbone_net)
-    outputs = tf.keras.layers.TimeDistributed(conv_2d_layer)(inputs_image)
-    emb = transformer1((outputs, inputs_position))
-    featureExtractor1 = tf.keras.Model((inputs_image, inputs_position), emb)
-
-
-    imgA = tf.keras.Input(shape=(10, 128, 128, 3))
-    imgB = tf.keras.Input(shape=(10, 128, 128, 3))
-    inputs_position = tf.keras.Input(shape=(input_transformer_shape[0]))
-
-    # featureExtractor = build_siamese_model((10,64,64,3))
-    featsA = featureExtractor1((imgA, inputs_position))
-    featsB = featureExtractor1((imgB, inputs_position))
-
-    # finally, construct the siamese network
-    distance = Lambda(euclidean_distance)([featsA, featsB])
-    final_model = tf.keras.Model(inputs=[imgA, imgB, inputs_position], outputs=distance)
-    model_dict = {}
-    final_model.compile(loss=contrastive_loss, optimizer=tf.keras.optimizers.Adam(1e-5))
-    model_dict['contrastive_model'] = final_model
+    for k in model_dict:
+        f_model, feature_extractor = create_model(n_frames)
+        model_dict[k] = f_model
+        featureExtractors_dict[k] = feature_extractor
 
     gg = 0
 
@@ -590,36 +684,26 @@ def main(_argv):
             path, label, label_op, img_np = path, label, label_op.numpy(), img_np.numpy()
             # label_op = np.reshape(label_op, (len(label_op), -1))
             # label_op = label_op[:,1,1:]
-            for k in model_dict.keys():
+            for idx, k in enumerate(model_dict.keys()):
                 f_m = model_dict.get(k)
-                pI, pL = make_pairs(img_np, label_op)
-                positions = np.asarray([[i for i in range(input_transformer_shape[0])] for _ in range(len(pI))])
-                i1 = pI[:, 0, :, :, :]
-                i2 = pI[:, 1, :, :, :]
-                for _ in range(5):
-                    f_m.fit((i1, i2, positions), pL, verbose=1, batch_size=32)
+                train(idx, f_m, label_op, img_np)
+
+            if gg % 5 == 0:
+                # save the model
+                for idxx, k in enumerate(featureExtractors_dict.keys()):
+                    f_a = featureExtractors_dict.get(k)
+                    name_model = os.path.join(path_results, ''.join([k, '_feature_extractor_.h5']))
+                    f_a.save(name_model, save_format='h5')
                     gc.collect()
+                    tf.keras.backend.clear_session()
 
-            if gg % 10 == 0:
-                for k in model_dict.keys():
-                    f_m = model_dict.get(k)
-                    path_save_model = ''.join([path_results, k, name_model, '.h5'])
-                    featureExtractor1.save(path_save_model, save_format='h5')
-                    p = len(label_op) // len(np.unique([str(i) for i in label_op])) - 1
-                    emb = featureExtractor1.predict((i1, positions), batch_size=16, verbose=0)
-                    model = TSNE(n_components=2, random_state=0, perplexity=p)
-                    op_emb = model.fit_transform(emb)
+            if gg % 20 == 0:
+                create_val_plots(training_generator, featureExtractors_dict, gg, 'train', max_iter=10, n_frames=n_frames)
+                gc.collect()
 
-                    plt.figure(1, figsize=(12, 8))
-                    plt.clf()
-                    plt.title(f'TSNE train iter: {str(gg)}')
-                    plt.scatter(op_emb[:, 0], op_emb[:, 1], s=5, c='r')
-                    path_plot = os.path.join(path_results, plot_name)
-                    plt.savefig(path_plot)
-                    plt.clf()
-                    display.clear_output(wait=True)
-                    display.display(pl.gcf())
-
+                # validation dataset
+                if gg % 10 == 0:
+                    create_val_plots(valid_generator, featureExtractors_dict, gg, 'val', n_frames=n_frames)
             gg += 1
             if gg == 100:
                 break
@@ -630,10 +714,12 @@ if __name__ == '__main__':
     flags.DEFINE_string('name_model', '', 'directory dataset')
     flags.DEFINE_string('path_pickle_train', '', 'directory annotations')
     flags.DEFINE_string('path_pickle_val', '', 'directory annotations val')
+    flags.DEFINE_string('path_dataset', '', 'path dataset')
+    flags.DEFINE_integer('num_frames_input', 10, 'size of the video clipsre')
+
     flags.DEFINE_string('data_center', 'both', 'which sub-division to use [stras, bern] or both')
     flags.DEFINE_string('plot_name', 'binary', 'binary or level')
     flags.DEFINE_string('backbone_net',     'mobilenet', 'backbone')
-    flags.DEFINE_string('path_dataset', '', 'path dataset')
     try:
         app.run(main)
     except SystemExit:
