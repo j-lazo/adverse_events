@@ -459,8 +459,8 @@ def train(i, f_m, label_op, img_np, n_frames=10):
 
 def create_val_plots(valid_generator, featureExtractors_dict, gg, dataset, max_iter=20, path_results=os.getcwd(), n_frames=10):
     input_transformer_shape = (n_frames, 1024)
-
-    for idxx, k in enumerate(featureExtractors_dict.keys()):
+    idx_dict = {'bleeding': 0, 'mi': 1, 'ti': 2}
+    for k in featureExtractors_dict.keys():
         featureExtractor = featureExtractors_dict.get(k)
         e = []
         l = []
@@ -480,40 +480,43 @@ def create_val_plots(valid_generator, featureExtractors_dict, gg, dataset, max_i
         l = np.asarray(l)
         e = np.reshape(e, (-1, 96))
         l = np.reshape(l, (-1, 3))
-        label1 = []
-        uq = {}
-        h = 0
-        for i in l:
-            # i = i[0]
-            i = i[idxx]
-            if str(i) not in uq:
-                uq[str(i)] = h
-                h += 1
-            label1.append(uq.get(str(i)))
 
-        emb = e
-        p = len(emb) // len(uq)
-        # p = 32
-        if p >= len(label1):
-            p = 32
-        model = TSNE(n_components=2, random_state=0, perplexity=p)
-        op_emb = model.fit_transform(emb)
-        # imhandle = plt.scatter(op_emb[:,0], op_emb[:,1], s = 3, c=label1, cmap = 'jet')
-        plt.figure(idxx + 3, figsize=(12, 8))
+        for ind in idx_dict:
+            idxx = idx_dict[ind]
+            label1 = []
+            uq = {}
+            h = 0
+            for i in l:
+                # i = i[0]
+                i = i[idxx]
+                if str(i) not in uq:
+                    uq[str(i)] = h
+                    h += 1
+                label1.append(uq.get(str(i)))
 
-        fig, ax = plt.subplots()
-        plt.title(f'TSNE {k} iter: {str(gg)}')
-        scatter = ax.scatter(op_emb[:, 0], op_emb[:, 1], s=3, c=label1, cmap='jet')
-        # produce a legend with the unique colors from the scatter
-        legend1 = ax.legend(*scatter.legend_elements(),
-                            loc="best", title="Grades")
-        ax.add_artist(legend1)
-        # produce a legend with a cross-section of sizes from the scatter
-        handles, labels = scatter.legend_elements(prop="sizes", alpha=0.6)
-        path_plot_val = os.path.join(path_results, f'tsne_plot_{k}_{dataset}.png')
-        plt.savefig(path_plot_val)
-        plt.clf()
-        plt.close()
+            emb = e
+            p = len(emb) // len(uq)
+            # p = 32
+            if p >= len(label1):
+                p = 32
+            model = TSNE(n_components=2, random_state=0, perplexity=p)
+            op_emb = model.fit_transform(emb)
+            # imhandle = plt.scatter(op_emb[:,0], op_emb[:,1], s = 3, c=label1, cmap = 'jet')
+            plt.figure(idxx + 3, figsize=(12, 8))
+
+            fig, ax = plt.subplots()
+            plt.title(f'TSNE {k} iter: {str(gg)}')
+            scatter = ax.scatter(op_emb[:, 0], op_emb[:, 1], s=3, c=label1, cmap='jet')
+            # produce a legend with the unique colors from the scatter
+            legend1 = ax.legend(*scatter.legend_elements(),
+                                loc="best", title="Grades")
+            ax.add_artist(legend1)
+            # produce a legend with a cross-section of sizes from the scatter
+            handles, labels = scatter.legend_elements(prop="sizes", alpha=0.6)
+            path_plot_val = os.path.join(path_results, f'tsne_plot_{k}_{ind}_{dataset}.png')
+            plt.savefig(path_plot_val)
+            plt.clf()
+            plt.close()
 
 
 def create_model(n_frames=10):
@@ -700,9 +703,9 @@ def main(_argv):
                 create_val_plots(training_generator, featureExtractors_dict, gg, 'train', max_iter=10, n_frames=n_frames, path_results=path_results)
                 gc.collect()
 
-                # validation dataset
-                if gg % 10 == 0:
-                    create_val_plots(valid_generator, featureExtractors_dict, gg, 'val', n_frames=n_frames, path_results=path_results)
+            # validation dataset
+            if gg % 10 == 0:
+                create_val_plots(valid_generator, featureExtractors_dict, gg, 'val', n_frames=n_frames, path_results=path_results)
             gg += 1
             if gg == 100:
                 break
