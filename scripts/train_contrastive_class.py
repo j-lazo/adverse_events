@@ -121,7 +121,8 @@ def get_labels_class(dataset_dict):
     Thermal_injury = dataset_dict.get('Thermal injury')
     Overall = dataset_dict.get('Overall')
     Bleeding = dataset_dict.get('Bleeding')
-    labels_class = [Overall, Bleeding, Mechanical_injury, Thermal_injury]
+    #labels_class = [Overall, Bleeding, Mechanical_injury, Thermal_injury]
+    labels_class = [Bleeding, Mechanical_injury, Thermal_injury]
     out_labels = [x if x != None else 0 for x in labels_class]
     return out_labels
 
