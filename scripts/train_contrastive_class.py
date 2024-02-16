@@ -519,6 +519,8 @@ def create_val_plots(valid_generator, featureExtractors_dict, gg, dataset, max_i
             plt.close()
 
 
+
+
 def create_model(n_frames=10):
     input_transformer_shape = (n_frames, 1024)
     imgA = tf.keras.Input(shape=(n_frames, 128, 128, 3))
@@ -640,6 +642,9 @@ class Dataset_v1(torch.utils.data.Dataset):
 #    return f1, mse
 
 def main(_argv):
+    physical_devices = tf.config.list_physical_devices('GPU')
+    print('Build with Cuda:', tf.test.is_built_with_cuda())
+    print("Num GPUs:", len(physical_devices))
     tf.keras.backend.clear_session()
     path_pickle = FLAGS.path_pickle_train
     path_dataset = FLAGS.path_dataset
@@ -688,7 +693,7 @@ def main(_argv):
             # label_op = label_op[:,1,1:]
             for idx, k in enumerate(model_dict.keys()):
                 f_m = model_dict.get(k)
-                train(idx, f_m, label_op, img_np)
+                train(idx, f_m, label_op, img_np, n_frames=n_frames)
 
             if gg % 5 == 0:
                 # save the model
