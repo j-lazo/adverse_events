@@ -453,7 +453,7 @@ def train(i, f_m, label_op, img_np, n_frames=10):
     i1 = pI[:,0,:,:,:]
     i2 = pI[:,1,:,:,:]
     for _ in range(5):
-        f_m.fit((i1, i2, positions), pL, verbose=1, batch_size=32)
+        f_m.fit((i1, i2, positions), pL, verbose=1, batch_size=16)
         gc.collect()
 
 
