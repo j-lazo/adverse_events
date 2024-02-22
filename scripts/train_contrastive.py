@@ -77,13 +77,13 @@ def get_bleeding_level(dict_frame):
     if dict_frame['Bleeding - 1'] == 1:
         bleeding_level = 1
     elif dict_frame['Bleeding - 2'] == 1:
-        bleeding_level = 1
+        bleeding_level = 2
     elif dict_frame['Bleeding - 3'] == 1:
-        bleeding_level = 2
+        bleeding_level = 3
     elif dict_frame['Bleeding - 4'] == 1:
-        bleeding_level = 2
+        bleeding_level = 4
     elif dict_frame['Bleeding - 5'] == 1:
-        bleeding_level = 2
+        bleeding_level = 5
 
     return bleeding_level
 
@@ -147,26 +147,6 @@ def contrastive_loss(y, preds, margin=1):
 	loss = K.mean(y * squaredPreds + (1 - y) * squaredMargin)
 	# return the computed contrastive loss to the calling function
 	return loss
-
-def build_siamese_model(inputShape, embeddingDim=48):
-	# specify the inputs for the feature extractor network
-	inputs = tf.keras.Input(shape=(10,64,64,3))
-	x = Reshape((64,64,30))(inputs)
-	# define the first set of CONV => RELU => POOL => DROPOUT layers
-	x = Conv2D(64, (2, 2), padding="same", activation="relu")(x)
-	x = MaxPooling2D(pool_size=(2, 2))(x)
-	x = Dropout(0.3)(x)
-	# second set of CONV => RELU => POOL => DROPOUT layers
-	x = Conv2D(64, (2, 2), padding="same", activation="relu")(x)
-	x = MaxPooling2D(pool_size=2)(x)
-	x = Dropout(0.3)(x)
-	# prepare the final outputs
-	pooledOutput = GlobalAveragePooling2D()(x)
-	outputs = Dense(embeddingDim)(pooledOutput)
-	# build the model
-	model = tf.keras.Model(inputs, outputs)
-	# return the model to the calling function
-	return model
 
 def euclidean_distance(vectors):
 	# unpack the vectors into separate lists
@@ -668,8 +648,9 @@ def main(_argv):
     training_generator = torch.utils.data.DataLoader(d1, **params)
     valid_generator = torch.utils.data.DataLoader(d2, **params_val)
 
-    model_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
-    featureExtractors_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
+    #model_dict = {'bleeding_model': None, 'mi_model': None, 'ti_model': None}
+    model_dict = {'bleeding_model': None}
+    featureExtractors_dict = {'bleeding_model': None}
 
     for k in model_dict:
         f_model, feature_extractor = create_model(n_frames)
