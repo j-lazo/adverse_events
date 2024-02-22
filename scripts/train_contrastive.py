@@ -667,7 +667,7 @@ def main(_argv):
             # label_op = label_op[:,1,1:]
             for idx, k in enumerate(model_dict.keys()):
                 f_m = model_dict.get(k)
-                train(idx, f_m, label_op, img_np)
+                train(idx, f_m, label_op, img_np, n_frames=n_frames)
 
             if gg % 5 == 0:
                 # save the model
