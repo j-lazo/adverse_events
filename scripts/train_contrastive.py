@@ -677,6 +677,13 @@ def main(_argv):
                     f_a.save(name_model, save_format='h5')
                     gc.collect()
                     tf.keras.backend.clear_session()
+     
+                for idxx, k in enumerate(model_dict.keys()):
+                    f_m = featureExtractors_dict.get(k)
+                    name_model_all = os.path.join(path_results, ''.join([k, '_complete_model_.h5']))
+                    f_m.save(name_model_all, save_format='h5')
+                    gc.collect()
+                    tf.keras.backend.clear_session()
 
             if gg % 20 == 0:
                 create_val_plots(training_generator, featureExtractors_dict, gg, 'train', max_iter=10, n_frames=n_frames, path_results=path_results)
